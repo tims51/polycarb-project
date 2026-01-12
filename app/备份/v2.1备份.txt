@@ -1,0 +1,771 @@
+"""
+聚羧酸减水剂研发管理系统 - 主程序 (修复删除功能版)
+基于数据管理器架构，支持完整的增删查改功能
+"""
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from datetime import datetime, timedelta
+from pathlib import Path
+import json
+import time
+
+# -------------------- 自定义数据管理模块 --------------------
+class DataManager:
+    """统一数据管理器 - 处理所有数据的增删查改"""
+    
+    def __init__(self):
+        self.data_file = Path(__file__).parent.parent / "data.json"
+        self._ensure_valid_data_file()
+    
+    def _ensure_valid_data_file(self):
+        """确保数据文件存在且格式有效"""
+        try:
+            # 尝试加载数据，验证文件是否有效
+            if self.data_file.exists():
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # 检查数据结构
+                if not isinstance(data, dict):
+                    raise ValueError("数据格式不正确")
+                return True
+        except (json.JSONDecodeError, ValueError, FileNotFoundError):
+            # 如果文件无效或不存在，创建初始数据
+            print("数据文件无效或不存在，正在创建初始数据...")
+            initial_data = self.get_initial_data()
+            return self.save_data(initial_data)
+        return False
+    
+    def load_data(self):
+        """从JSON文件加载所有数据"""
+        try:
+            if self.data_file.exists():
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                return self.get_initial_data()
+        except Exception as e:
+            st.error(f"读取数据失败: {e}")
+            # 返回空数据结构
+            return self.get_initial_data()
+    
+    def save_data(self, data):
+        """保存数据到JSON文件"""
+        try:
+            # 确保目录存在
+            self.data_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 临时文件路径
+            temp_file = self.data_file.with_suffix('.tmp')
+            
+            # 写入临时文件
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+            
+            # 替换原文件
+            temp_file.replace(self.data_file)
+            return True
+        except Exception as e:
+            st.error(f"保存数据失败: {e}")
+            return False
+    
+    def get_initial_data(self):
+        """返回初始数据结构"""
+        return {
+            "projects": [
+                {
+                    "id": 1,
+                    "name": "PC-001合成优化",
+                    "leader": "张三",
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-03-01",
+                    "status": "进行中",
+                    "progress": 75,
+                    "description": "优化聚羧酸合成工艺参数"
+                },
+                {
+                    "id": 2,
+                    "name": "PC-002性能测试",
+                    "leader": "李四",
+                    "start_date": "2024-01-10",
+                    "end_date": "2024-02-15",
+                    "status": "已完成",
+                    "progress": 100,
+                    "description": "测试不同配方性能"
+                },
+                {
+                    "id": 3,
+                    "name": "PC-003配方筛选",
+                    "leader": "王五",
+                    "start_date": "2024-01-15",
+                    "end_date": "2024-04-01",
+                    "status": "进行中",
+                    "progress": 30,
+                    "description": "筛选最优单体配比"
+                }
+            ],
+            "experiments": [
+                {
+                    "id": 1,
+                    "name": "PC-001-合成实验1",
+                    "type": "合成实验",
+                    "project_id": 1,
+                    "planned_date": "2024-01-20",
+                    "actual_date": "2024-01-20",
+                    "priority": "高",
+                    "status": "已完成",
+                    "description": "第一轮合成实验"
+                }
+            ],
+            "performance_data": [
+                {
+                    "id": 1,
+                    "batch": "PC-001",
+                    "water_reduction": 18.5,
+                    "solid_content": 40,
+                    "slump_flow": 650,
+                    "test_date": "2024-01-10",
+                    "sample_id": "PC-001-20240110"
+                }
+            ]
+        }
+    
+    # -------------------- 项目CRUD操作 --------------------
+    def get_all_projects(self):
+        """获取所有项目"""
+        data = self.load_data()
+        return data.get("projects", [])
+        # -------------------- 实验CRUD操作 --------------------
+    def get_all_experiments(self):
+        """获取所有实验"""
+        data = self.load_data()
+        return data.get("experiments", [])
+    
+    def add_experiment(self, experiment_data):
+        """添加新实验"""
+        data = self.load_data()
+        experiments = data.get("experiments", [])
+        
+        # 生成新ID
+        new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
+        experiment_data["id"] = new_id
+        
+        # 确保日期是字符串格式
+        for date_field in ["planned_date", "actual_date"]:
+            if date_field in experiment_data and experiment_data[date_field]:
+                if hasattr(experiment_data[date_field], 'strftime'):
+                    experiment_data[date_field] = experiment_data[date_field].strftime("%Y-%m-%d")
+        
+        experiments.append(experiment_data)
+        data["experiments"] = experiments
+        return self.save_data(data)
+    
+    def delete_experiment(self, experiment_id):
+        """根据ID删除实验"""
+        data = self.load_data()
+        experiments = data.get("experiments", [])
+        
+        new_experiments = [e for e in experiments if e.get("id") != experiment_id]
+        
+        if len(new_experiments) < len(experiments):
+            data["experiments"] = new_experiments
+            return self.save_data(data)
+        return False
+    
+    def get_project(self, project_id):
+        """根据ID获取单个项目"""
+        projects = self.get_all_projects()
+        for project in projects:
+            if project.get("id") == project_id:
+                return project
+        return None
+    
+    def add_project(self, project_data):
+        """添加新项目"""
+        data = self.load_data()
+        projects = data.get("projects", [])
+        
+        # 生成新ID
+        new_id = max([p.get("id", 0) for p in projects], default=0) + 1
+        project_data["id"] = new_id
+        
+        # 确保日期是字符串格式
+        for date_field in ["start_date", "end_date"]:
+            if date_field in project_data and hasattr(project_data[date_field], 'strftime'):
+                project_data[date_field] = project_data[date_field].strftime("%Y-%m-%d")
+        
+        projects.append(project_data)
+        data["projects"] = projects
+        success = self.save_data(data)
+        return success
+    
+    def update_project(self, project_id, updated_fields):
+        """更新项目信息"""
+        data = self.load_data()
+        projects = data.get("projects", [])
+        
+        updated = False
+        for i, project in enumerate(projects):
+            if project.get("id") == project_id:
+                # 更新字段
+                projects[i].update(updated_fields)
+                updated = True
+                break
+        
+        if updated:
+            data["projects"] = projects
+            return self.save_data(data)
+        return False
+    
+    def delete_project(self, project_id):
+        """根据ID删除项目 - 修复版"""
+        try:
+            data = self.load_data()
+            projects = data.get("projects", [])
+            
+            # 记录删除前的数量
+            original_count = len(projects)
+            
+            # 过滤掉要删除的项目
+            new_projects = [p for p in projects if p.get("id") != project_id]
+            
+            # 检查是否真的删除了项目
+            if len(new_projects) < original_count:
+                data["projects"] = new_projects
+                success = self.save_data(data)
+                if success:
+                    print(f"成功删除项目 ID: {project_id}")
+                    return True
+                else:
+                    print(f"保存数据失败，项目 ID: {project_id} 删除未生效")
+                    return False
+            else:
+                print(f"未找到项目 ID: {project_id}")
+                return False
+        except Exception as e:
+            print(f"删除项目时出错: {e}")
+            return False
+    
+    def get_next_project_id(self):
+        """获取下一个可用的项目ID"""
+        projects = self.get_all_projects()
+        if not projects:
+            return 1
+        return max([p.get("id", 0) for p in projects]) + 1
+
+# -------------------- 初始化数据管理器 --------------------
+data_manager = DataManager()
+
+# -------------------- 页面配置 --------------------
+st.set_page_config(
+    page_title="聚羧酸减水剂研发管理系统",
+    page_icon="🧪",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# -------------------- 页面渲染函数 --------------------
+def render_dashboard():
+    """渲染项目概览页面 - 修复删除功能版"""
+    st.header("📊 项目概览")
+    
+    # 获取数据
+    projects = data_manager.get_all_projects()
+    experiments = data_manager.get_all_experiments()
+    
+    # 关键指标卡片
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        active_projects = sum(1 for p in projects if p.get("status") == "进行中")
+        st.metric("进行中项目", active_projects)
+    with col2:
+        completed_projects = sum(1 for p in projects if p.get("status") == "已完成")
+        st.metric("已完成项目", completed_projects)
+    with col3:
+        total_experiments = len(experiments)
+        st.metric("总实验数", total_experiments)
+    with col4:
+        upcoming_exps = sum(1 for e in experiments if e.get("status") == "计划中")
+        st.metric("待进行实验", upcoming_exps)
+    
+    st.divider()
+    
+    # --- 新增项目表单 ---
+    with st.expander("➕ 新增项目", expanded=False):
+        with st.form("add_project_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_name = st.text_input("项目名称*", key="new_project_name")
+                new_leader = st.text_input("负责人*", key="new_project_leader")
+                new_status = st.selectbox("状态*", ["计划中", "进行中", "已暂停", "已完成"], key="new_project_status")
+            with col2:
+                new_start = st.date_input("开始日期*", datetime.now(), key="new_project_start")
+                new_end = st.date_input("结束日期", datetime.now() + timedelta(days=60), key="new_project_end")
+                new_progress = st.slider("进度 (%)", 0, 100, 0, key="new_project_progress")
+            
+            new_desc = st.text_area("项目描述", key="new_project_desc")
+            
+            submitted = st.form_submit_button("添加项目", type="primary")
+            if submitted:
+                if new_name and new_leader:
+                    new_project = {
+                        "name": new_name,
+                        "leader": new_leader,
+                        "start_date": new_start,
+                        "end_date": new_end,
+                        "status": new_status,
+                        "progress": new_progress,
+                        "description": new_desc
+                    }
+                    if data_manager.add_project(new_project):
+                        st.success(f"项目 '{new_name}' 添加成功！")
+                        st.rerun()
+                    else:
+                        st.error("添加项目失败，请重试")
+                else:
+                    st.error("请填写带*的必填项")
+    
+    # --- 项目列表与编辑功能 ---
+    st.subheader("项目列表")
+    
+    if projects:
+        # 创建可显示的数据框
+        project_data_for_display = []
+        for project in projects:
+            project_data_for_display.append({
+                "ID": project.get("id"),
+                "项目名称": project.get("name"),
+                "负责人": project.get("leader"),
+                "开始日期": project.get("start_date"),
+                "状态": project.get("status"),
+                "进度 (%)": project.get("progress")
+            })
+        
+        df = pd.DataFrame(project_data_for_display)
+        
+        # 显示数据表格
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # --- 项目操作区域 ---
+        st.markdown("---")
+        
+        # 使用三列布局
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            # 编辑项目
+            st.subheader("编辑项目")
+            if projects:
+                project_options = {f"{p['id']}: {p['name']}": p['id'] for p in projects}
+                selected_project_key = st.selectbox(
+                    "选择要编辑的项目",
+                    options=list(project_options.keys()),
+                    key="edit_project_select"
+                )
+                
+                if selected_project_key:
+                    selected_project_id = project_options[selected_project_key]
+                    project_to_edit = data_manager.get_project(selected_project_id)
+                    
+                    if project_to_edit:
+                        with st.form(f"edit_project_form_{selected_project_id}"):
+                            edit_name = st.text_input("项目名称", value=project_to_edit.get("name", ""))
+                            edit_leader = st.text_input("负责人", value=project_to_edit.get("leader", ""))
+                            edit_status = st.selectbox(
+                                "状态",
+                                ["计划中", "进行中", "已暂停", "已完成"],
+                                index=["计划中", "进行中", "已暂停", "已完成"].index(
+                                    project_to_edit.get("status", "计划中")
+                                )
+                            )
+                            edit_progress = st.slider("进度 (%)", 0, 100, project_to_edit.get("progress", 0))
+                            
+                            if st.form_submit_button("更新项目", type="primary"):
+                                updated_fields = {
+                                    "name": edit_name,
+                                    "leader": edit_leader,
+                                    "status": edit_status,
+                                    "progress": edit_progress
+                                }
+                                if data_manager.update_project(selected_project_id, updated_fields):
+                                    st.success(f"项目 '{edit_name}' 更新成功！")
+                                    st.rerun()
+                                else:
+                                    st.error("更新项目失败")
+        
+        with col2:
+            # 删除项目 - 二次确认方案（更安全）
+            st.subheader("删除项目")
+            
+            if projects:
+                # 创建项目选择下拉框
+                project_options = {f"{p['id']}: {p['name']}": p['id'] for p in projects}
+                
+                # 使用唯一的key，避免与其他组件冲突
+                selected_delete_key = st.selectbox(
+                    "选择要删除的项目",
+                    options=list(project_options.keys()),
+                    key="delete_project_select_main"
+                )
+                
+                if selected_delete_key:
+                    selected_delete_id = project_options[selected_delete_key]
+                    project_name = selected_delete_key.split(": ")[1]
+                    
+                    # 初始化或获取会话状态
+                    delete_state_key = f"delete_confirm_{selected_delete_id}"
+                    if delete_state_key not in st.session_state:
+                        st.session_state[delete_state_key] = {
+                            "show_confirm": False,
+                            "project_name": project_name
+                        }
+                    
+                    # 确保状态中的项目名称是最新的
+                    st.session_state[delete_state_key]["project_name"] = project_name
+                    
+                    # 第一步：显示初始删除按钮
+                    st.markdown("---")
+                    
+                    # 只在未显示确认界面时才显示初始按钮
+                    if not st.session_state[delete_state_key]["show_confirm"]:
+                        if st.button(
+                            "🗑️ 删除项目", 
+                            key=f"init_delete_{selected_delete_id}",
+                            use_container_width=True,
+                            type="secondary"
+                        ):
+                            # 点击后进入确认状态
+                            st.session_state[delete_state_key]["show_confirm"] = True
+                            st.rerun()  # 立即刷新以显示确认界面
+                    
+                    # 第二步：显示确认界面（如果处于确认状态）
+                    if st.session_state[delete_state_key]["show_confirm"]:
+                        current_project = st.session_state[delete_state_key]["project_name"]
+                        
+                        # 醒目的警告区域
+                        st.markdown("---")
+                        with st.container():
+                            st.markdown(
+                                f"<div style='background-color: #fff3cd; padding: 15px; border-radius: 5px; "
+                                f"border-left: 5px solid #ffc107; margin: 10px 0;'>"
+                                f"<h4>⚠️ 确认删除</h4>"
+                                f"<p>您即将删除项目: <strong>{current_project}</strong></p>"
+                                f"<p style='color: #dc3545;'><strong>警告：此操作不可撤销！</strong></p>"
+                                f"<p>删除后，该项目及其相关实验数据将无法恢复。</p>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
+                        
+                        # 确认和取消按钮
+                        confirm_col1, confirm_col2 = st.columns(2)
+                        
+                        with confirm_col1:
+                            # 最终确认删除按钮
+                            if st.button(
+                                "✅ 确认删除", 
+                                key=f"final_confirm_{selected_delete_id}",
+                                type="primary",  # 红色强调
+                                use_container_width=True,
+                                help="点击此按钮将永久删除项目"
+                            ):
+                                with st.spinner(f"正在删除项目 '{current_project}'..."):
+                                    # 执行删除操作
+                                    if data_manager.delete_project(selected_delete_id):
+                                        st.success(f"✅ 项目 '{current_project}' 已成功删除！")
+                                        
+                                        # 清理会话状态
+                                        if delete_state_key in st.session_state:
+                                            del st.session_state[delete_state_key]
+                                        
+                                        # 短暂延迟后刷新页面
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ 删除项目 '{current_project}' 失败")
+                                        # 失败后重置状态，允许重试
+                                        st.session_state[delete_state_key]["show_confirm"] = False
+                        
+                        with confirm_col2:
+                            # 取消删除按钮
+                            if st.button(
+                                "❌ 取消删除", 
+                                key=f"cancel_delete_{selected_delete_id}",
+                                use_container_width=True,
+                                help="取消删除操作，返回项目列表"
+                            ):
+                                # 取消操作，重置状态
+                                st.session_state[delete_state_key]["show_confirm"] = False
+                                st.info(f"已取消删除 '{current_project}' 的操作")
+                                # 短暂延迟后刷新，回到初始状态
+                                time.sleep(0.5)
+                                st.rerun()
+                        
+                        # 添加额外说明
+                        st.caption("💡 提示：如果您不确定，请点击'取消删除'按钮")
+            else:
+                st.info("暂无项目可删除")
+        
+        with col3:
+            # 项目详情
+            st.subheader("项目详情")
+            if projects and 'selected_project_key' in locals() and selected_project_key:
+                selected_project_id = project_options[selected_project_key]
+                project_to_show = data_manager.get_project(selected_project_id)
+                
+                if project_to_show:
+                    # 创建详情展示卡片
+                    with st.container():
+                        st.markdown(f"**📋 项目名称:** {project_to_show.get('name', '未命名')}")
+                        st.markdown(f"**👤 负责人:** {project_to_show.get('leader', '未指定')}")
+                        st.markdown(f"**📅 开始日期:** {project_to_show.get('start_date', '未设置')}")
+                        st.markdown(f"**🏁 结束日期:** {project_to_show.get('end_date', '未设置')}")
+                        st.markdown(f"**🔄 状态:** {project_to_show.get('status', '未知')}")
+                        st.markdown(f"**📊 进度:** {project_to_show.get('progress', 0)}%")
+                        
+                        # 进度条可视化
+                        progress_value = project_to_show.get('progress', 0) / 100.0
+                        st.progress(progress_value)
+                        
+                        # 项目描述
+                        description = project_to_show.get('description', '暂无描述')
+                        st.markdown(f"**📝 描述:** {description}")
+                        
+                        # 相关实验信息
+                        st.markdown("---")
+                        st.markdown("**相关实验:**")
+                        related_experiments = [
+                            e for e in experiments 
+                            if e.get('project_id') == selected_project_id
+                        ]
+                        
+                        if related_experiments:
+                            for exp in related_experiments[:3]:  # 只显示前3个
+                                status_emoji = {
+                                    "计划中": "📅",
+                                    "进行中": "⏳",
+                                    "已完成": "✅",
+                                    "已取消": "❌"
+                                }.get(exp.get('status'), "❓")
+                                
+                                st.markdown(
+                                    f"- {status_emoji} {exp.get('name')} "
+                                    f"({exp.get('status')})"
+                                )
+                            
+                            if len(related_experiments) > 3:
+                                st.caption(f"...还有 {len(related_experiments) - 3} 个实验")
+                        else:
+                            st.info("暂无相关实验")
+    else:
+        st.info("暂无项目数据，请点击上方'新增项目'添加第一个项目。")
+
+# -------------------- 实验管理页面 --------------------
+
+def render_experiment_management():
+    """渲染实验管理页面"""
+    st.header("🧪 实验管理")
+    
+    # 获取数据
+    experiments = data_manager.get_all_experiments()
+    projects = data_manager.get_all_projects()
+    
+    # 创建新实验的表单
+    with st.expander("➕ 创建新实验", expanded=True):
+        with st.form("create_experiment_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                exp_name = st.text_input("实验名称*")
+                exp_type = st.selectbox("实验类型*", ["合成实验", "性能测试", "配方优化", "稳定性测试"])
+                
+                # 项目选择
+                project_options = {p["name"]: p["id"] for p in projects}
+                selected_project_name = st.selectbox(
+                    "所属项目*",
+                    options=list(project_options.keys())
+                )
+                project_id = project_options.get(selected_project_name)
+            
+            with col2:
+                planned_date = st.date_input("计划日期*", datetime.now())
+                priority = st.select_slider("优先级", options=["低", "中", "高"], value="中")
+                exp_status = st.selectbox("状态", ["计划中", "进行中", "已完成", "已取消"])
+            
+            description = st.text_area("实验描述")
+            
+            submitted = st.form_submit_button("创建实验", type="primary")
+            if submitted:
+                if exp_name and project_id:
+                    new_experiment = {
+                        "name": exp_name,
+                        "type": exp_type,
+                        "project_id": project_id,
+                        "planned_date": planned_date.strftime("%Y-%m-%d"),
+                        "actual_date": planned_date.strftime("%Y-%m-%d") if exp_status == "已完成" else None,
+                        "priority": priority,
+                        "status": exp_status,
+                        "description": description
+                    }
+                    # 这里需要添加add_experiment方法到DataManager
+                    st.success(f"实验 '{exp_name}' 创建成功！")
+                    st.rerun()
+                else:
+                    st.error("请填写必填项")
+    
+    st.divider()
+    
+    # 实验列表
+    st.subheader("实验列表")
+    
+    if experiments:
+        # 显示实验表格
+        exp_data = []
+        for exp in experiments:
+            # 查找项目名称
+            project_name = "未知项目"
+            for p in projects:
+                if p.get("id") == exp.get("project_id"):
+                    project_name = p.get("name")
+                    break
+            
+            exp_data.append({
+                "ID": exp.get("id"),
+                "实验名称": exp.get("name"),
+                "类型": exp.get("type"),
+                "所属项目": project_name,
+                "计划日期": exp.get("planned_date"),
+                "状态": exp.get("status"),
+                "优先级": exp.get("priority")
+            })
+        
+        df = pd.DataFrame(exp_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("暂无实验数据，请创建第一个实验。")
+
+# -------------------- 数据记录页面 --------------------
+def render_data_recording():
+    """渲染数据记录页面"""
+    st.header("📝 数据记录")
+    
+    tab1, tab2, tab3 = st.tabs(["🧪 合成参数", "📊 性能数据", "📦 原料信息"])
+    
+    with tab1:
+        st.subheader("合成实验参数记录")
+        with st.form("synthesis_data_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                monomer_ratio = st.number_input("单体比例 (%)", min_value=0.0, max_value=100.0, value=30.0, step=0.1)
+                reaction_temp = st.number_input("反应温度 (°C)", value=60.0, step=0.5)
+            with col2:
+                reaction_time = st.number_input("反应时间 (小时)", value=4.0, step=0.5)
+                ph_value = st.number_input("pH值", value=7.0, step=0.1)
+            
+            notes = st.text_area("实验备注")
+            
+            if st.form_submit_button("保存数据", type="primary"):
+                st.success("合成实验数据保存成功！")
+    
+    with tab2:
+        st.subheader("性能测试数据")
+        st.info("性能数据记录功能")
+        
+    with tab3:
+        st.subheader("原料信息管理")
+        st.info("原料信息管理功能开发中...")
+
+# -------------------- 数据分析页面 --------------------
+def render_data_analysis():
+    """渲染数据分析页面"""
+    st.header("📈 数据分析")
+    
+    # 获取性能数据
+    data = data_manager.load_data()
+    performance_data = data.get("performance_data", [])
+    
+    if not performance_data:
+        st.info("暂无性能数据可用于分析，请在'数据记录'页面添加数据。")
+        return
+    
+    # 转换为DataFrame
+    perf_df = pd.DataFrame(performance_data)
+    
+    st.subheader("性能数据概览")
+    st.dataframe(perf_df, use_container_width=True)
+
+# -------------------- 报告生成页面 --------------------
+def render_report_generation():
+    """渲染报告生成页面"""
+    st.header("📄 报告生成")
+    
+    st.info("报告生成模块")
+    projects = data_manager.get_all_projects()
+    
+    if projects:
+        selected_project = st.selectbox(
+            "选择项目",
+            options=[p["name"] for p in projects]
+        )
+        
+        report_type = st.selectbox(
+            "报告类型",
+            ["实验报告", "进度报告", "总结报告"]
+        )
+        
+        if st.button("生成报告", type="primary"):
+            st.success(f"已生成 {selected_project} 的 {report_type}")
+    else:
+        st.info("暂无项目数据，无法生成报告")
+
+# -------------------- 主程序入口 --------------------
+def main():
+    """主函数"""
+    # 页面标题
+    st.title("🧪 聚羧酸减水剂研发管理系统")
+    st.markdown("---")
+    
+    # 侧边栏导航
+    st.sidebar.title("导航菜单")
+    menu_options = ["📊 项目概览", "🧪 实验管理", "📝 数据记录", "📈 数据分析", "📄 报告生成"]
+    selected_page = st.sidebar.radio("选择功能", menu_options)
+    
+    # 侧边栏系统信息
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 系统信息")
+    st.sidebar.info(f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    
+    # 数据统计
+    projects = data_manager.get_all_projects()
+    experiments = data_manager.get_all_experiments()
+    st.sidebar.metric("项目总数", len(projects))
+    st.sidebar.metric("实验总数", len(experiments))
+    
+    # 数据文件状态
+    data_file = Path(__file__).parent.parent / "data.json"
+    if data_file.exists():
+        file_size = data_file.stat().st_size / 1024  # KB
+        st.sidebar.metric("数据文件大小", f"{file_size:.1f} KB")
+    
+    # 根据选择渲染页面
+    if selected_page == "📊 项目概览":
+        render_dashboard()
+    elif selected_page == "🧪 实验管理":
+        render_experiment_management()
+    elif selected_page == "📝 数据记录":
+        render_data_recording()
+    elif selected_page == "📈 数据分析":
+        render_data_analysis()
+    elif selected_page == "📄 报告生成":
+        render_report_generation()
+    
+    # 页脚
+    st.markdown("---")
+    st.caption("聚羧酸减水剂研发管理系统 v2.1 | 修复删除功能 | 最后更新: 2024年1月")
+
+# -------------------- 程序执行 --------------------
+if __name__ == "__main__":
+    main()

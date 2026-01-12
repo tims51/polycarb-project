@@ -1,0 +1,814 @@
+{
+    "projects": [
+        {
+            "name": "唐山工厂母液管理",
+            "leader": "111",
+            "start_date": "2026-01-09",
+            "end_date": "2026-03-10",
+            "status": "进行中",
+            "progress": 100,
+            "description": "工厂母液管理",
+            "id": 1
+        },
+        {
+            "name": "降黏母液",
+            "leader": "111",
+            "start_date": "2026-01-01",
+            "end_date": "2026-03-10",
+            "status": "进行中",
+            "progress": 50,
+            "description": "降黏母液配方开发",
+            "id": 2
+        },
+        {
+            "name": "早强母液",
+            "leader": "111",
+            "start_date": "2025-10-01",
+            "end_date": "2026-01-01",
+            "status": "已完成",
+            "progress": 100,
+            "description": "对标411，开发早强母液",
+            "id": 3
+        },
+        {
+            "name": "晶核早强剂",
+            "leader": "111",
+            "start_date": "2025-10-01",
+            "end_date": "2026-01-01",
+            "status": "已完成",
+            "progress": 100,
+            "description": "晶核早强剂载体及成品开发",
+            "id": 4
+        },
+        {
+            "name": "减缩剂",
+            "leader": "111",
+            "start_date": "2026-01-01",
+            "end_date": "2026-03-31",
+            "status": "进行中",
+            "progress": 20,
+            "description": "降低混凝土干燥收缩和自收缩",
+            "id": 5
+        },
+        {
+            "name": "仿五龙保坍母液",
+            "leader": "徐梓馨",
+            "start_date": "2025-10-01",
+            "end_date": "2025-12-31",
+            "status": "已完成",
+            "progress": 100,
+            "description": "仿五龙保坍母液用于国外项目",
+            "id": 6
+        }
+    ],
+    "experiments": [
+        {
+            "name": "40A生产检测",
+            "type": "性能测试",
+            "project_id": 1,
+            "planned_date": "2026-01-01",
+            "actual_date": null,
+            "priority": "中",
+            "status": "进行中",
+            "description": "生产检测",
+            "id": 2
+        },
+        {
+            "name": "60A性能测试",
+            "type": "性能测试",
+            "project_id": 1,
+            "created_date": "2026-01-11",
+            "planned_date": "2026-01-01",
+            "actual_date": null,
+            "priority": "中",
+            "status": "进行中",
+            "description": "母液生产检测",
+            "id": 4
+        },
+        {
+            "name": "106D生产检测",
+            "type": "性能测试",
+            "project_id": 1,
+            "created_date": "2026-01-11",
+            "planned_date": "2026-01-01",
+            "actual_date": null,
+            "priority": "中",
+            "status": "进行中",
+            "description": "生产检测",
+            "id": 5
+        }
+    ],
+    "performance_data": {
+        "synthesis": [
+            {
+                "id": 1,
+                "batch": "PC-001",
+                "water_reduction": 18.5,
+                "solid_content": 40,
+                "slump_flow": 650,
+                "test_date": "2024-01-10",
+                "sample_id": "PC-001-20240110"
+            }
+        ],
+        "paste": [],
+        "mortar": [],
+        "concrete": []
+    },
+    "raw_materials": [
+        {
+            "name": "6碳聚醚大单体",
+            "chemical_formula": "EPEG",
+            "molecular_weight": 3000.0,
+            "solid_content": 100.0,
+            "unit_price": 6300.0,
+            "odor": "无",
+            "storage_condition": "阴凉干燥",
+            "supplier": "科隆",
+            "main_usage": "大单体",
+            "created_date": "2026-01-08",
+            "id": 1,
+            "material_number": "HCDDT1",
+            "abbreviation": "EPEG-3000",
+            "usage_category": "母液合成"
+        },
+        {
+            "name": "水",
+            "chemical_formula": "H2O",
+            "molecular_weight": 18.0,
+            "solid_content": 0.0,
+            "unit_price": 5.0,
+            "odor": "无",
+            "storage_condition": "常温",
+            "supplier": "无",
+            "main_usage": "水",
+            "created_date": "2026-01-08",
+            "id": 2,
+            "material_number": "CJS-1",
+            "abbreviation": "S-1",
+            "usage_category": "母液合成"
+        },
+        {
+            "name": "丙烯酸",
+            "material_number": "HCXDT01",
+            "abbreviation": "AA",
+            "chemical_formula": "C3H4O2",
+            "molecular_weight": 72.06,
+            "solid_content": 100.0,
+            "unit_price": 6800.0,
+            "odor": "刺激性",
+            "storage_condition": "干燥阴凉",
+            "supplier": "万华化学",
+            "usage_category": "母液合成",
+            "main_usage": "合成用聚合小单体",
+            "created_date": "2026-01-10",
+            "id": 3
+        },
+        {
+            "name": "丙烯酸羟乙酯",
+            "material_number": "HCXDT02",
+            "abbreviation": "HEA",
+            "chemical_formula": "C5H8O3",
+            "molecular_weight": 116.11,
+            "solid_content": 92.0,
+            "unit_price": 9700.0,
+            "odor": "强烈",
+            "storage_condition": "干燥阴凉",
+            "supplier": "暂无",
+            "usage_category": "母液合成",
+            "main_usage": "合成用聚合小单体",
+            "created_date": "2026-01-10",
+            "id": 4
+        },
+        {
+            "name": "丙烯酸羟丙脂",
+            "material_number": "HCXDT03",
+            "abbreviation": "HPA",
+            "chemical_formula": "C6H10O3",
+            "molecular_weight": 130.14,
+            "solid_content": 92.0,
+            "unit_price": 11000.0,
+            "odor": "中等",
+            "storage_condition": "干燥阴凉",
+            "supplier": "暂无",
+            "usage_category": "母液合成",
+            "main_usage": "合成用小单体",
+            "created_date": "2026-01-10",
+            "id": 5
+        },
+        {
+            "name": "615功单",
+            "material_number": "HCXDT04",
+            "abbreviation": "615",
+            "chemical_formula": "无",
+            "molecular_weight": 0.0,
+            "solid_content": 30.0,
+            "unit_price": 11000.0,
+            "odor": "轻微",
+            "storage_condition": "干燥阴凉",
+            "supplier": "弗洛瑞",
+            "usage_category": "母液合成",
+            "main_usage": "合成用小单体",
+            "created_date": "2026-01-10",
+            "id": 6
+        },
+        {
+            "name": "双氧水",
+            "material_number": "HCYFJ01",
+            "abbreviation": "Y-1",
+            "chemical_formula": "H2O2",
+            "molecular_weight": 34.01,
+            "solid_content": 0.0,
+            "unit_price": 1400.0,
+            "odor": "无",
+            "storage_condition": "干燥阴凉",
+            "supplier": "天津大沽精细化工有限公司",
+            "usage_category": "母液合成",
+            "main_usage": "合成用氧化剂",
+            "created_date": "2026-01-10",
+            "id": 7
+        },
+        {
+            "name": "巯基丙酸",
+            "material_number": "HCLZYJ01",
+            "abbreviation": "L-1",
+            "chemical_formula": "C3H6O2S",
+            "molecular_weight": 106.15,
+            "solid_content": 90.0,
+            "unit_price": 24000.0,
+            "odor": "强烈",
+            "storage_condition": "干燥阴凉通风",
+            "supplier": "沈阳北砼科技有限公司",
+            "usage_category": "母液合成",
+            "main_usage": "合成用链转移剂",
+            "created_date": "2026-01-10",
+            "id": 8
+        },
+        {
+            "name": "维生素C",
+            "material_number": "HCHYJ01",
+            "abbreviation": "HY-1",
+            "chemical_formula": "C8H8O6",
+            "molecular_weight": 176.12,
+            "solid_content": 100.0,
+            "unit_price": 0.0,
+            "odor": "无",
+            "storage_condition": "干燥",
+            "supplier": "黑龙江新和成生物科技有限公司",
+            "usage_category": "母液合成",
+            "main_usage": "合成用还原剂",
+            "created_date": "2026-01-10",
+            "id": 9
+        },
+        {
+            "name": "四碳聚醚大单体",
+            "material_number": "HCDDT",
+            "abbreviation": "HPEG-3000",
+            "chemical_formula": "HPEG-3000",
+            "molecular_weight": 3000.0,
+            "solid_content": 100.0,
+            "unit_price": 6300.0,
+            "odor": "无",
+            "storage_condition": "干燥阴凉",
+            "supplier": "科隆",
+            "usage_category": "母液合成",
+            "main_usage": "合成用聚醚大单体",
+            "created_date": "2026-01-10",
+            "id": 10
+        },
+        {
+            "name": "氢氧化钠",
+            "material_number": "PHTTJ01",
+            "abbreviation": "NaOH",
+            "chemical_formula": "NaOH",
+            "molecular_weight": 40.0,
+            "solid_content": 100.0,
+            "unit_price": 3600.0,
+            "odor": "无",
+            "storage_condition": "干燥",
+            "supplier": "内蒙古伊东集团东兴化工有限责任公司",
+            "usage_category": "复配和助剂,速凝剂",
+            "main_usage": "母液pH调节剂，速凝剂原材料",
+            "created_date": "2026-01-10",
+            "id": 11
+        },
+        {
+            "name": "葡萄糖酸钠",
+            "material_number": "FPHNJ01",
+            "abbreviation": "PN",
+            "chemical_formula": "C6H11O7Na",
+            "molecular_weight": 218.14,
+            "solid_content": 100.0,
+            "unit_price": 4000.0,
+            "odor": "无",
+            "storage_condition": "干燥阴凉",
+            "supplier": "玉星生物（集团）股份有限公司",
+            "usage_category": "复配和助剂",
+            "main_usage": "复配用缓凝剂",
+            "created_date": "2026-01-10",
+            "id": 12
+        },
+        {
+            "name": "保水剂-420",
+            "material_number": "FPBSJ01",
+            "abbreviation": "复配用保水剂",
+            "chemical_formula": "无",
+            "molecular_weight": 0.0,
+            "solid_content": 5.0,
+            "unit_price": 3000.0,
+            "odor": "无",
+            "storage_condition": "干燥阴凉",
+            "supplier": "西卡",
+            "usage_category": "复配和助剂",
+            "main_usage": "保水剂",
+            "created_date": "2026-01-10",
+            "id": 13
+        },
+        {
+            "name": "白糖",
+            "material_number": "FPHNT02",
+            "abbreviation": "BT",
+            "chemical_formula": "C12H22O11",
+            "molecular_weight": 342.3,
+            "solid_content": 100.0,
+            "unit_price": 6000.0,
+            "odor": "无",
+            "storage_condition": "干燥阴凉",
+            "supplier": "暂无",
+            "usage_category": "复配和助剂",
+            "main_usage": "复配缓凝剂",
+            "created_date": "2026-01-10",
+            "id": 14
+        },
+        {
+            "name": "氟硅酸",
+            "material_number": "SNJ-01",
+            "abbreviation": "FGS",
+            "chemical_formula": "H2SiF6",
+            "molecular_weight": 114.09,
+            "solid_content": 30.0,
+            "unit_price": 800.0,
+            "odor": "刺激性",
+            "storage_condition": "密封罐储存，通风",
+            "supplier": "暂无",
+            "usage_category": "速凝剂",
+            "main_usage": "",
+            "created_date": "2026-01-10",
+            "id": 15
+        },
+        {
+            "name": "氢氧化铝",
+            "material_number": "SNJ-02",
+            "abbreviation": "ATH",
+            "chemical_formula": "Al(OH)3",
+            "molecular_weight": 78.0,
+            "solid_content": 100.0,
+            "unit_price": 3000.0,
+            "odor": "无",
+            "storage_condition": "干燥",
+            "supplier": "暂无",
+            "usage_category": "速凝剂",
+            "main_usage": "",
+            "created_date": "2026-01-10",
+            "id": 16
+        },
+        {
+            "name": "十八水硫酸铝",
+            "material_number": "SNJ-03",
+            "abbreviation": "AS",
+            "chemical_formula": "Al2(S04)3",
+            "molecular_weight": 666.43,
+            "solid_content": 51.34,
+            "unit_price": 850.0,
+            "odor": "无",
+            "storage_condition": "阴凉干燥",
+            "supplier": "暂无",
+            "usage_category": "速凝剂",
+            "main_usage": "",
+            "created_date": "2026-01-10",
+            "id": 17
+        }
+    ],
+    "synthesis_records": [
+        {
+            "formula_id": "ASDA",
+            "experiment_id": 1,
+            "design_solid_content": 40.0,
+            "operator": "XZX",
+            "synthesis_date": "2026-01-08",
+            "reactor_materials": [
+                {
+                    "name": "单体1",
+                    "material_name": "EPEG-300",
+                    "amount": 0.5
+                },
+                {
+                    "name": "水",
+                    "material_name": "水",
+                    "amount": 0.4
+                }
+            ],
+            "reactor_total_amount": 0.9,
+            "a_materials": [
+                {
+                    "name": "单体a",
+                    "material_name": "EPEG-300",
+                    "amount": 0.6
+                }
+            ],
+            "a_total_amount": 0.6,
+            "a_drip_time": 120.0,
+            "a_drip_speed": 0.005,
+            "b_materials": [
+                {
+                    "name": "引发剂2",
+                    "material_name": "EPEG-300",
+                    "amount": 0.6
+                }
+            ],
+            "b_total_amount": 0.6,
+            "b_drip_time": 60.0,
+            "b_drip_speed": 0.01,
+            "start_temp": 10.0,
+            "max_temp": 36.0,
+            "holding_time": 2.0,
+            "process_notes": "WU",
+            "created_at": "2026-01-08 16:03:10",
+            "last_modified": "2026-01-08 16:03:10",
+            "id": 1
+        },
+        {
+            "formula_id": "112313",
+            "experiment_id": 1,
+            "design_solid_content": 40.0,
+            "operator": "徐梓馨",
+            "synthesis_date": "2026-01-08",
+            "reactor_materials": [
+                {
+                    "name": "单体1",
+                    "material_name": "EPEG-300",
+                    "amount": 360.0
+                }
+            ],
+            "reactor_total_amount": 360.0,
+            "a_materials": [
+                {
+                    "name": "单体a",
+                    "material_name": "EPEG-300",
+                    "amount": 122.0
+                }
+            ],
+            "a_total_amount": 122.0,
+            "a_drip_time": 120.0,
+            "a_drip_speed": 1.0166666666666666,
+            "b_materials": [
+                {
+                    "name": "引发剂2",
+                    "material_name": "EPEG-300",
+                    "amount": 123.0
+                }
+            ],
+            "b_total_amount": 123.0,
+            "b_drip_time": 60.0,
+            "b_drip_speed": 2.05,
+            "start_temp": 20.0,
+            "max_temp": 80.0,
+            "holding_time": 2.0,
+            "process_notes": "",
+            "created_at": "2026-01-08 19:17:00",
+            "last_modified": "2026-01-08 19:17:00",
+            "id": 2
+        }
+    ],
+    "products": [
+        {
+            "product_name": "1",
+            "product_code": "1",
+            "batch_number": "1",
+            "production_date": "2026-01-08",
+            "solid_content": 40.0,
+            "density": 1.05,
+            "ph_value": 7.0,
+            "base_formula": "自定义配方",
+            "ingredients": [],
+            "description": "1",
+            "created_at": "2026-01-08 19:18:18",
+            "id": 1
+        },
+        {
+            "product_name": "q",
+            "product_code": "1",
+            "batch_number": "1231",
+            "production_date": "2026-01-09",
+            "expiration_date": "2026-07-08",
+            "solid_content": 40.0,
+            "calculated_solid_content": 100.0,
+            "density": 1.05,
+            "ph_value": 7.0,
+            "viscosity": 50.0,
+            "color": "无色透明",
+            "odor": "无味",
+            "storage_condition": "常温密封",
+            "package_type": "塑料桶",
+            "related_synthesis": "ASDA (XZX)",
+            "ingredients": [
+                {
+                    "name": "EPEG-300",
+                    "amount": 12.0,
+                    "material_id": 1,
+                    "solid_content": 100.0
+                }
+            ],
+            "total_mass": 12.0,
+            "total_solid_mass": 12.0,
+            "description": "",
+            "created_at": "2026-01-09 17:23:48",
+            "last_modified": "2026-01-09 17:23:48",
+            "id": 2
+        },
+        {
+            "product_name": "1",
+            "product_code": "1",
+            "batch_number": "1",
+            "production_date": "2026-01-09",
+            "expiration_date": "2026-07-08",
+            "solid_content": 40.0,
+            "calculated_solid_content": 100.0,
+            "density": 1.05,
+            "ph_value": 7.0,
+            "viscosity": 50.0,
+            "color": "无色透明",
+            "odor": "无味",
+            "storage_condition": "常温密封",
+            "package_type": "塑料桶",
+            "related_synthesis": "ASDA (XZX)",
+            "ingredients": [
+                {
+                    "name": "EPEG-300",
+                    "amount": 212.0,
+                    "material_id": 1,
+                    "solid_content": 100.0
+                }
+            ],
+            "total_mass": 212.0,
+            "total_solid_mass": 212.0,
+            "description": "",
+            "created_at": "2026-01-09 18:11:55",
+            "last_modified": "2026-01-09 18:11:55",
+            "id": 3
+        }
+    ],
+    "paste_experiments": [
+        {
+            "formula_name": "合成实验: 112313",
+            "experiment_purpose": "生产检测",
+            "test_date": "2026-01-11 12:31",
+            "water_cement_ratio": 0.29,
+            "cement_amount_g": 300.0,
+            "water_amount_g": 87.0,
+            "admixture_dosage_g": 0.2,
+            "performance": {
+                "flow_initial_mm": 220.0,
+                "flow_10min_mm": 0.0,
+                "flow_30min_mm": 0.0,
+                "flow_1h_mm": 0.0,
+                "flow_1_5h_mm": 0.0,
+                "flow_2h_mm": 0.0,
+                "std_flow_initial_mm": 0.0,
+                "std_flow_10min_mm": 0.0,
+                "std_flow_30min_mm": 0.0,
+                "std_flow_1h_mm": 0.0,
+                "std_flow_1_5h_mm": 0.0,
+                "std_flow_2h_mm": 0.0,
+                "standard_sample_name": "自定义/无"
+            },
+            "notes": "",
+            "operator": "Unknown",
+            "created_at": "2026-01-11 12:31:37",
+            "id": 1
+        },
+        {
+            "formula_name": "母液: 106D (ID:1)",
+            "experiment_purpose": "生产检测",
+            "test_date": "2026-01-11 13:26",
+            "water_cement_ratio": 0.29,
+            "cement_amount_g": 300.0,
+            "water_amount_g": 87.0,
+            "admixture_dosage_g": 0.2,
+            "performance": {
+                "flow_initial_mm": 220.0,
+                "std_flow_initial_mm": 0.0,
+                "flow_10min_mm": 0.0,
+                "std_flow_10min_mm": 0.0,
+                "flow_30min_mm": 0.0,
+                "std_flow_30min_mm": 0.0,
+                "flow_1h_mm": 0.0,
+                "std_flow_1h_mm": 0.0,
+                "flow_1_5h_mm": 0.0,
+                "std_flow_1_5h_mm": 0.0,
+                "flow_2h_mm": 0.0,
+                "std_flow_2h_mm": 0.0,
+                "standard_sample_name": "自定义/无"
+            },
+            "notes": "",
+            "operator": "Unknown",
+            "created_at": "2026-01-11 13:26:21",
+            "id": 2
+        },
+        {
+            "formula_name": "母液: 106D (ID:1)",
+            "experiment_purpose": "性能对比测试",
+            "test_date": "2026-01-11 13:26",
+            "water_cement_ratio": 0.29,
+            "cement_amount_g": 300.0,
+            "water_amount_g": 87.0,
+            "admixture_dosage_g": 0.2,
+            "performance": {
+                "flow_initial_mm": 220.0,
+                "std_flow_initial_mm": 0.0,
+                "flow_10min_mm": 0.0,
+                "std_flow_10min_mm": 0.0,
+                "flow_30min_mm": 0.0,
+                "std_flow_30min_mm": 0.0,
+                "flow_1h_mm": 0.0,
+                "std_flow_1h_mm": 0.0,
+                "flow_1_5h_mm": 0.0,
+                "std_flow_1_5h_mm": 0.0,
+                "flow_2h_mm": 0.0,
+                "std_flow_2h_mm": 0.0
+            },
+            "notes": "",
+            "operator": "Unknown",
+            "created_at": "2026-01-11 13:26:30",
+            "id": 3
+        },
+        {
+            "formula_name": "母液: 106D (ID:1)",
+            "experiment_purpose": "性能对比测试",
+            "test_date": "2026-01-11 13:26",
+            "water_cement_ratio": 0.29,
+            "cement_amount_g": 300.0,
+            "water_amount_g": 87.0,
+            "admixture_dosage_g": 0.2,
+            "performance": {
+                "flow_initial_mm": 220.0,
+                "std_flow_initial_mm": 0.0,
+                "flow_10min_mm": 0.0,
+                "std_flow_10min_mm": 0.0,
+                "flow_30min_mm": 0.0,
+                "std_flow_30min_mm": 0.0,
+                "flow_1h_mm": 0.0,
+                "std_flow_1h_mm": 0.0,
+                "flow_1_5h_mm": 0.0,
+                "std_flow_1_5h_mm": 0.0,
+                "flow_2h_mm": 0.0,
+                "std_flow_2h_mm": 0.0
+            },
+            "notes": "",
+            "operator": "Unknown",
+            "created_at": "2026-01-11 13:26:42",
+            "id": 4
+        }
+    ],
+    "mortar_experiments": [
+        {
+            "formula_name": "合成实验: ASDA",
+            "water_cement_ratio": 0.4,
+            "unit_weight": 2200.0,
+            "admixture_dosage": 1.0,
+            "sand_moisture": 3.0,
+            "materials": {
+                "cement": 450.0,
+                "mineral1": 0.0,
+                "mineral2": 0.0,
+                "mineral3": 0.0,
+                "sand1": 1350.0,
+                "sand2": 0.0,
+                "sand3": 0.0,
+                "water": 180.0,
+                "actual_water": 139.5
+            },
+            "performance": {
+                "flow": 180.0,
+                "air_content": 0.0,
+                "strength_7d": 0.0,
+                "strength_28d": 0.0,
+                "compressive_strengths": {
+                    "1d": 0.0,
+                    "3d": 0.0,
+                    "7d": 0.0,
+                    "28d": 0.0
+                }
+            },
+            "notes": "",
+            "operator": "Unknown",
+            "id": 1,
+            "created_at": "2026-01-10 13:46:39"
+        }
+    ],
+    "concrete_experiments": [
+        {
+            "formula_name": "合成实验: ASDA",
+            "water_cement_ratio": 0.4,
+            "sand_ratio": 42.0,
+            "unit_weight": 2400.0,
+            "admixture_dosage": 1.0,
+            "sand_moisture": 3.0,
+            "stone_moisture": 1.0,
+            "materials": {
+                "cement": 300.0,
+                "mineral1": 50.0,
+                "mineral2": 0.0,
+                "mineral3": 0.0,
+                "sand1": 800.0,
+                "sand2": 0.0,
+                "sand3": 0.0,
+                "stone1": 1100.0,
+                "stone2": 0.0,
+                "stone3": 0.0,
+                "water": 140.0,
+                "actual_water": 105.0
+            },
+            "performance": {
+                "slump_mm": 180.0,
+                "slump_flow_mm": 500.0,
+                "air_content_percent": 3.0,
+                "chloride_content_percent": 0.01,
+                "strength_7d_mpa": 35.0,
+                "strength_28d_mpa": 50.0,
+                "compressive_strengths": {
+                    "1d": 25.0,
+                    "7d": 35.0,
+                    "28d": 50.0
+                }
+            },
+            "notes": "",
+            "operator": "徐梓馨",
+            "id": 1,
+            "created_at": "2026-01-09 19:02:13",
+            "test_date": "2026-01-09",
+            "last_modified": "2026-01-10 20:08:02"
+        },
+        {
+            "formula_name": "合成实验: ASDA",
+            "test_date": "2026-01-10 21:55",
+            "water_cement_ratio": 0.4,
+            "sand_ratio": 42.0,
+            "unit_weight": 2400.0,
+            "admixture_dosage": 1.0,
+            "sand_moisture": 3.0,
+            "stone_moisture": 1.0,
+            "materials": {
+                "cement": 300.0,
+                "mineral1": 50.0,
+                "mineral2": 0.0,
+                "mineral3": 0.0,
+                "sand1": 800.0,
+                "sand2": 0.0,
+                "sand3": 0.0,
+                "stone1": 1100.0,
+                "stone2": 0.0,
+                "stone3": 0.0,
+                "water": 140.0,
+                "actual_water": 105.0
+            },
+            "performance": {
+                "slump_mm": 180.0,
+                "slump_flow_mm": 500.0,
+                "inverted_slump_time": 0.0,
+                "bleeding_amount": 0.0,
+                "time_dependent_loss": {},
+                "air_content_percent": 3.0,
+                "chloride_content_percent": 0.01,
+                "strength_7d_mpa": 0.0,
+                "strength_28d_mpa": 0.0,
+                "compressive_strengths": {
+                    "1d": 0.0,
+                    "3d": 0.0,
+                    "7d": 0.0,
+                    "28d": 0.0
+                }
+            },
+            "notes": "",
+            "operator": "Unknown",
+            "id": 2,
+            "created_at": "2026-01-10 21:56:58"
+        }
+    ],
+    "mother_liquors": [
+        {
+            "name": "106D",
+            "source_type": "production",
+            "batch_number": "20260111-1",
+            "production_date": "2026-01-11",
+            "production_mode": "代工生产",
+            "manufacturer": "瑞创联",
+            "solid_content": 40.0,
+            "ph_value": 5.0,
+            "density": 1.1,
+            "color": "无色透明",
+            "description": "",
+            "created_at": "2026-01-11 10:54",
+            "id": 1
+        }
+    ]
+}

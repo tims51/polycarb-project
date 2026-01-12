@@ -1,0 +1,819 @@
+# -------------------- 数据记录页面 --------------------
+def render_data_recording():
+    """渲染数据记录页面 - 重构版，分为四个功能模块"""
+    st.header("📝 数据记录")
+    
+    # 使用选项卡分为四个功能模块
+    tab1, tab2, tab3, tab4 = st.tabs(["🧪 合成实验", "🥣 净浆实验", "🏗️ 砂浆实验", "🏢 混凝土实验"])
+    
+    # 获取实验项目和实验数据
+    experiments = data_manager.get_all_experiments()
+    projects = data_manager.get_all_projects()
+    data = data_manager.load_data()
+    
+    # 初始化数据存储结构
+    if "performance_data" not in data:
+        data["performance_data"] = {
+            "synthesis": [],
+            "paste": [],
+            "mortar": [],
+            "concrete": []
+        }
+    
+    # 辅助函数：获取实验选项
+    def get_experiment_options(exp_type=None):
+        """根据实验类型获取实验选项"""
+        options = {}
+        for exp in experiments:
+            if exp_type and exp.get("type") != exp_type:
+                continue
+            # 查找项目名称
+            project_name = "未知项目"
+            for proj in projects:
+                if proj.get("id") == exp.get("project_id"):
+                    project_name = proj.get("name", "未知项目")
+                    break
+            # 使用实验ID和名称作为选项
+            exp_key = f"{exp['id']}: {exp['name']} - {project_name}"
+            options[exp_key] = exp['id']
+        return options
+    
+   # 1. 合成实验数据记录 - 重大修改
+    with tab1:
+        st.subheader("🧪 合成实验数据记录")
+        
+        # 创建三列布局
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
+            # 实验选择
+            exp_options = get_experiment_options("合成实验")
+            if exp_options:
+                selected_exp_key = st.selectbox(
+                    "选择实验项目*",
+                    options=list(exp_options.keys()),
+                    key="synthesis_exp_select"
+                )
+                selected_exp_id = exp_options.get(selected_exp_key)
+            else:
+                st.warning("暂无合成实验项目，请在实验管理中创建")
+                selected_exp_id = None
+            
+            # 基础信息
+            with st.container(border=True):
+                st.markdown("### 基础信息")
+                record_date = st.date_input("记录日期*", datetime.now(), key="synthesis_date")
+                operator = st.text_input("操作人*", value="徐梓馨", key="synthesis_operator")
+                batch_no = st.text_input("批次号*", placeholder="例如: SYN-20240106-001", key="synthesis_batch")
+                formula_id = st.text_input("配方编号", placeholder="例如: F-001", key="synthesis_formula")
+        
+        with col2:
+            # 性能指标 - 增加颜色指标
+            with st.container(border=True):
+                st.markdown("### 性能指标")
+                col_metric1, col_metric2 = st.columns(2)
+                with col_metric1:
+                    water_reduction = st.number_input("减水率 (%)", min_value=0.0, max_value=100.0, value=18.5, step=0.1, key="synthesis_water_reduction")
+                    solid_content = st.number_input("固含量 (%)", min_value=0.0, max_value=100.0, value=40.0, step=0.1, key="synthesis_solid")
+                    ph_value = st.number_input("pH值", min_value=0.0, max_value=14.0, value=7.0, step=0.1, key="synthesis_ph")
+                
+                with col_metric2:
+                    density = st.number_input("密度 (g/cm³)", min_value=0.0, max_value=2.0, value=1.05, step=0.01, key="synthesis_density")
+                    viscosity = st.number_input("粘度 (mPa·s)", min_value=0.0, max_value=10000.0, value=50.0, step=1.0, key="synthesis_viscosity")
+                    stability = st.selectbox("稳定性", ["优良", "良好", "一般", "较差"], key="synthesis_stability")
+                    color = st.text_input("颜色", placeholder="例如: 淡黄色", key="synthesis_color")
+        
+        with col3:
+            # 反应条件
+            with st.container(border=True):
+                st.markdown("### 反应条件")
+                reaction_temp = st.number_input("反应温度 (°C)", min_value=0.0, max_value=200.0, value=60.0, step=0.5, key="synthesis_temp")
+                reaction_time = st.number_input("反应时间 (小时)", min_value=0.0, max_value=24.0, value=4.0, step=0.5, key="synthesis_time")
+                nitrogen_time = st.number_input("氮气保护时间 (分钟)", min_value=0, max_value=120, value=30, step=5, key="synthesis_nitrogen")
+        
+        # ==================== 合成工艺参数 ====================
+        # 1. 反应釜部分
+        with st.expander("⚙️ 反应釜部分", expanded=True):
+            st.markdown("#### 反应釜物料")
+            
+            col_reactor1, col_reactor2, col_reactor3, col_reactor4 = st.columns(4)
+            
+            with col_reactor1:
+                big_monomer = st.number_input("大单体 (g)", min_value=0.0, value=100.0, step=1.0, key="big_monomer")
+                small_monomer1 = st.number_input("小单体1 (g)", min_value=0.0, value=20.0, step=1.0, key="small_monomer1")
+            
+            with col_reactor2:
+                small_monomer2 = st.number_input("小单体2 (g)", min_value=0.0, value=15.0, step=1.0, key="small_monomer2")
+                small_monomer3 = st.number_input("小单体3 (g)", min_value=0.0, value=10.0, step=1.0, key="small_monomer3")
+            
+            with col_reactor3:
+                catalyst = st.number_input("催化剂 (g)", min_value=0.0, value=1.0, step=0.1, key="catalyst")
+                chain_transfer1 = st.number_input("链转移剂1 (g)", min_value=0.0, value=0.5, step=0.1, key="chain_transfer1")
+            
+            with col_reactor4:
+                initiator1 = st.number_input("引发剂 (g)", min_value=0.0, value=0.2, step=0.1, key="initiator1")
+                water1 = st.number_input("水 (g)", min_value=0.0, value=200.0, step=1.0, key="water1")
+            
+            # 滴加控制参数
+            st.markdown("#### 滴加控制参数")
+            col_drop1, col_drop2 = st.columns(2)
+            
+            with col_drop1:
+                drop_start_temp = st.number_input("滴加起始温度 (°C)", min_value=0.0, max_value=200.0, value=60.0, step=0.5, key="drop_start_temp")
+                max_temp_limit = st.number_input("最高温度限制 (°C)", min_value=0.0, max_value=200.0, value=80.0, step=0.5, key="max_temp_limit")
+            
+            with col_drop2:
+                drop_time_A = st.number_input("A料滴加时间 (min)", min_value=0, max_value=300, value=120, step=5, key="drop_time_A")
+                drop_time_B = st.number_input("B料滴加时间 (min)", min_value=0, max_value=300, value=180, step=5, key="drop_time_B")
+        
+        # 2. A料部分
+        with st.expander("🔬 A料部分", expanded=False):
+            st.markdown("#### A料组成")
+            
+            col_A1, col_A2, col_A3 = st.columns(3)
+            
+            with col_A1:
+                monomer1_A = st.number_input("单体1 (g)", min_value=0.0, value=30.0, step=1.0, key="monomer1_A")
+                monomer2_A = st.number_input("单体2 (g)", min_value=0.0, value=25.0, step=1.0, key="monomer2_A")
+            
+            with col_A2:
+                monomer3_A = st.number_input("单体3 (g)", min_value=0.0, value=20.0, step=1.0, key="monomer3_A")
+                monomer4_A = st.number_input("单体4 (g)", min_value=0.0, value=15.0, step=1.0, key="monomer4_A")
+            
+            with col_A3:
+                water_A = st.number_input("水 (g)", min_value=0.0, value=100.0, step=1.0, key="water_A")
+            
+            # 计算A料总量和滴加速度
+            total_A = monomer1_A + monomer2_A + monomer3_A + monomer4_A + water_A
+            drop_speed_A = total_A / drop_time_A if drop_time_A > 0 else 0
+            
+            col_calc1, col_calc2 = st.columns(2)
+            with col_calc1:
+                st.metric("A料总质量 (g)", f"{total_A:.1f}")
+            with col_calc2:
+                st.metric("A料滴加速度 (g/min)", f"{drop_speed_A:.1f}")
+        
+        # 3. B料部分
+        with st.expander("🔬 B料部分", expanded=False):
+            st.markdown("#### B料组成")
+            
+            col_B1, col_B2, col_B3 = st.columns(3)
+            
+            with col_B1:
+                initiator2_B = st.number_input("引发剂2 (g)", min_value=0.0, value=0.5, step=0.1, key="initiator2_B")
+                chain_transfer2_B = st.number_input("链转移剂2 (g)", min_value=0.0, value=0.3, step=0.1, key="chain_transfer2_B")
+            
+            with col_B2:
+                other1_B = st.number_input("其他物料1 (g)", min_value=0.0, value=1.0, step=0.1, key="other1_B")
+                other2_B = st.number_input("其他物料2 (g)", min_value=0.0, value=1.0, step=0.1, key="other2_B")
+            
+            with col_B3:
+                water_B = st.number_input("水 (g)", min_value=0.0, value=50.0, step=1.0, key="water_B")
+            
+            # 计算B料总量和滴加速度
+            total_B = initiator2_B + chain_transfer2_B + other1_B + other2_B + water_B
+            drop_speed_B = total_B / drop_time_B if drop_time_B > 0 else 0
+            
+            col_calc1, col_calc2 = st.columns(2)
+            with col_calc1:
+                st.metric("B料总质量 (g)", f"{total_B:.1f}")
+            with col_calc2:
+                st.metric("B料滴加速度 (g/min)", f"{drop_speed_B:.1f}")
+        
+        # ==================== 成品减水剂模块 ====================
+        with st.expander("📦 成品减水剂", expanded=False):
+            st.markdown("### 成品减水剂信息")
+            
+            col_product1, col_product2 = st.columns(2)
+            
+            with col_product1:
+                product_name = st.text_input("产品名称", placeholder="例如: PC-100", key="product_name")
+                product_batch = st.text_input("成品批次号", placeholder="例如: PC-100-20240106", key="product_batch")
+                production_date = st.date_input("生产日期", datetime.now(), key="production_date")
+                package_type = st.selectbox("包装形式", ["桶装", "袋装", "液袋", "其他"], key="package_type")
+            
+            with col_product2:
+                product_solid = st.number_input("成品固含量 (%)", min_value=0.0, max_value=100.0, value=40.0, step=0.1, key="product_solid")
+                product_ph = st.number_input("成品pH值", min_value=0.0, max_value=14.0, value=7.0, step=0.1, key="product_ph")
+                product_density = st.number_input("成品密度 (g/cm³)", min_value=0.0, max_value=2.0, value=1.05, step=0.01, key="product_density")
+                product_color = st.text_input("成品颜色", placeholder="例如: 淡黄色透明", key="product_color")
+        
+        # 备注和保存
+        col_note, col_save = st.columns([3, 1])
+        with col_note:
+            notes = st.text_area("实验备注", height=100, placeholder="记录实验现象、异常情况、改进建议等", key="synthesis_notes")
+        
+        with col_save:
+            st.markdown("<br>" * 4, unsafe_allow_html=True)
+            if st.button("💾 保存合成实验数据", type="primary", use_container_width=True, key="save_synthesis"):
+                if selected_exp_id and batch_no and operator:
+                    # 构建合成实验数据
+                    synthesis_data = {
+                        "id": str(uuid.uuid4())[:8],
+                        "experiment_id": selected_exp_id,
+                        "record_date": record_date.strftime("%Y-%m-%d"),
+                        "operator": operator,
+                        "batch_no": batch_no,
+                        "formula_id": formula_id,
+                        
+                        # 性能指标
+                        "water_reduction": water_reduction,
+                        "solid_content": solid_content,
+                        "ph_value": ph_value,
+                        "density": density,
+                        "viscosity": viscosity,
+                        "stability": stability,
+                        "color": color,
+                        
+                        # 反应条件
+                        "reaction_temp": reaction_temp,
+                        "reaction_time": reaction_time,
+                        "nitrogen_time": nitrogen_time,
+                        
+                        # 反应釜部分
+                        "big_monomer": big_monomer,
+                        "small_monomer1": small_monomer1,
+                        "small_monomer2": small_monomer2,
+                        "small_monomer3": small_monomer3,
+                        "catalyst": catalyst,
+                        "chain_transfer1": chain_transfer1,
+                        "initiator1": initiator1,
+                        "water1": water1,
+                        "drop_start_temp": drop_start_temp,
+                        "max_temp_limit": max_temp_limit,
+                        
+                        # A料部分
+                        "monomer1_A": monomer1_A,
+                        "monomer2_A": monomer2_A,
+                        "monomer3_A": monomer3_A,
+                        "monomer4_A": monomer4_A,
+                        "water_A": water_A,
+                        "drop_time_A": drop_time_A,
+                        "drop_speed_A": drop_speed_A,
+                        "total_A": total_A,
+                        
+                        # B料部分
+                        "initiator2_B": initiator2_B,
+                        "chain_transfer2_B": chain_transfer2_B,
+                        "other1_B": other1_B,
+                        "other2_B": other2_B,
+                        "water_B": water_B,
+                        "drop_time_B": drop_time_B,
+                        "drop_speed_B": drop_speed_B,
+                        "total_B": total_B,
+                        
+                        # 备注
+                        "notes": notes,
+                        
+                        # 元数据
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": "synthesis"
+                    }
+                    
+                    # 保存合成实验数据
+                    if data_manager.add_synthesis_record(synthesis_data):
+                        st.success("✅ 合成实验数据保存成功！")
+                        
+                        # 如果填写了成品减水剂信息，也保存成品数据
+                        if product_name and product_batch:
+                            product_data = {
+                                "product_name": product_name,
+                                "batch_no": product_batch,
+                                "production_date": production_date.strftime("%Y-%m-%d"),
+                                "package_type": package_type,
+                                "solid_content": product_solid,
+                                "ph_value": product_ph,
+                                "density": product_density,
+                                "color": product_color,
+                                "parent_batch": batch_no,  # 关联母液批次
+                                "synthesis_record_id": synthesis_data["id"],
+                                "experiment_id": selected_exp_id,
+                                "operator": operator
+                            }
+                            
+                            if data_manager.add_product(product_data):
+                                st.success("✅ 成品减水剂信息保存成功！")
+                        
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ 保存失败，请重试")
+                else:
+                    st.error("请填写带*的必填项")
+    
+    # 2. 净浆实验数据记录 - 修改为关联母液或成品
+    with tab2:
+        st.subheader("🥣 净浆实验数据记录")
+        
+        # 创建两列布局
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            # 实验选择
+            exp_options = get_experiment_options("性能测试")
+            if exp_options:
+                selected_exp_key = st.selectbox(
+                    "选择实验项目*",
+                    options=list(exp_options.keys()),
+                    key="paste_exp_select"
+                )
+                selected_exp_id = exp_options.get(selected_exp_key)
+            else:
+                st.warning("暂无性能测试实验项目，请在实验管理中创建")
+                selected_exp_id = None
+            
+            # 关联批次选择
+            with st.container(border=True):
+                st.markdown("### 关联批次")
+                
+                # 获取所有批次选项
+                batch_options = data_manager.get_all_batch_options()
+                
+                if batch_options:
+                    batch_option_names = [f"{b['name']} ({b['date']})" for b in batch_options]
+                    selected_batch_name = st.selectbox(
+                        "选择关联批次*",
+                        options=batch_option_names,
+                        key="paste_batch_select"
+                    )
+                    
+                    if selected_batch_name:
+                        selected_index = batch_option_names.index(selected_batch_name)
+                        selected_batch = batch_options[selected_index]
+                        batch_type = selected_batch["type"]
+                        batch_no = selected_batch["batch_no"]
+                        batch_source = selected_batch["source"]
+                        batch_source_id = selected_batch["source_id"]
+                        
+                        st.info(f"已选择: {batch_type} - {batch_no}")
+                else:
+                    st.warning("暂无可用批次，请先进行合成实验")
+                    batch_type = None
+                    batch_no = None
+                    batch_source = None
+                    batch_source_id = None
+            
+            # 基础信息
+            with st.container(border=True):
+                st.markdown("### 基础信息")
+                record_date = st.date_input("记录日期*", datetime.now(), key="paste_date")
+                operator = st.text_input("操作人*", value="徐梓馨", key="paste_operator")
+                sample_id = st.text_input("样品编号*", placeholder="例如: PASTE-001", key="paste_sample")
+        
+        with col2:
+            # 实验条件
+            with st.container(border=True):
+                st.markdown("### 实验条件")
+                col_cond1, col_cond2 = st.columns(2)
+                with col_cond1:
+                    cement_type = st.selectbox("水泥类型*", ["P·O 42.5", "P·O 52.5", "P·II 42.5", "其他"], key="paste_cement")
+                    water_cement_ratio = st.number_input("水灰比*", min_value=0.1, max_value=1.0, value=0.29, step=0.01, key="paste_wc")
+                
+                with col_cond2:
+                    admixture_dosage = st.number_input("减水剂掺量 (%)*", min_value=0.0, max_value=5.0, value=0.18, step=0.01, key="paste_dosage")
+                    temperature = st.number_input("环境温度 (°C)", value=20.0, step=0.5, key="paste_temp")
+        
+        # ... 其余净浆实验数据记录代码保持不变，只需在保存时添加关联批次信息 ...
+        
+        # 在保存净浆实验数据时，添加关联批次信息
+        if st.button("💾 保存净浆实验数据", type="primary", use_container_width=True, key="save_paste"):
+            if selected_exp_id and sample_id and operator and cement_type and batch_no:
+                # 构建数据记录，添加关联信息
+                paste_data = {
+                    # ... 原有字段 ...
+                    "related_batch_type": batch_type,
+                    "related_batch_no": batch_no,
+                    "related_batch_source": batch_source,
+                    "related_batch_id": batch_source_id,
+                    # ... 其余字段 ...
+                }
+    
+    # 2. 净浆实验数据记录
+    with tab2:
+        st.subheader("🥣 净浆实验数据记录")
+        
+        # 创建两列布局
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            # 实验选择
+            exp_options = get_experiment_options("性能测试")
+            if exp_options:
+                selected_exp_key = st.selectbox(
+                    "选择实验项目",
+                    options=list(exp_options.keys()),
+                    key="paste_exp_select"
+                )
+                selected_exp_id = exp_options.get(selected_exp_key)
+            else:
+                st.warning("暂无性能测试实验项目，请在实验管理中创建")
+                selected_exp_id = None
+            
+            # 基础信息
+            with st.container(border=True):
+                st.markdown("### 基础信息")
+                record_date = st.date_input("记录日期", datetime.now(), key="paste_date")
+                operator = st.text_input("操作人", value="徐梓馨", key="paste_operator")
+                sample_id = st.text_input("样品编号", placeholder="例如: PASTE-001", key="paste_sample")
+        
+        with col2:
+            # 实验条件
+            with st.container(border=True):
+                st.markdown("### 实验条件")
+                col_cond1, col_cond2 = st.columns(2)
+                with col_cond1:
+                    cement_type = st.selectbox("水泥类型", ["P·O 42.5", "P·O 52.5", "P·II 42.5", "其他"], key="paste_cement")
+                    water_cement_ratio = st.number_input("水灰比", min_value=0.1, max_value=1.0, value=0.29, step=0.01, key="paste_wc")
+                
+                with col_cond2:
+                    admixture_dosage = st.number_input("减水剂掺量 (%)", min_value=0.0, max_value=5.0, value=0.18, step=0.01, key="paste_dosage")
+                    temperature = st.number_input("环境温度 (°C)", value=20.0, step=0.5, key="paste_temp")
+        
+        # 流动度测试
+        with st.expander("📏 流动度测试", expanded=True):
+            col_flow1, col_flow2, col_flow3 = st.columns(3)
+            
+            with col_flow1:
+                st.markdown("#### 初始流动度")
+                initial_diameter = st.number_input("初始直径 (mm)", min_value=100, max_value=300, value=180, step=1, key="paste_initial_dia")
+                initial_time = st.number_input("流动时间 (s)", min_value=0, max_value=300, value=5, step=1, key="paste_initial_time")
+            
+            with col_flow2:
+                st.markdown("#### 30分钟流动度")
+                flow_30min_dia = st.number_input("30分钟直径 (mm)", min_value=100, max_value=300, value=175, step=1, key="paste_30min_dia")
+                flow_30min_ret = st.number_input("保持率 (%)", min_value=0.0, max_value=100.0, value=97.2, step=0.1, key="paste_30min_ret")
+            
+            with col_flow3:
+                st.markdown("#### 60分钟流动度")
+                flow_60min_dia = st.number_input("60分钟直径 (mm)", min_value=100, max_value=300, value=170, step=1, key="paste_60min_dia")
+                flow_60min_ret = st.number_input("保持率 (%)", min_value=0.0, max_value=100.0, value=94.4, step=0.1, key="paste_60min_ret")
+        
+        # 凝结时间
+        with st.expander("⏰ 凝结时间", expanded=False):
+            col_set1, col_set2 = st.columns(2)
+            with col_set1:
+                initial_setting = st.number_input("初凝时间 (min)", min_value=0, max_value=1000, value=240, step=5, key="paste_initial_set")
+                final_setting = st.number_input("终凝时间 (min)", min_value=0, max_value=1500, value=360, step=5, key="paste_final_set")
+        
+        # 备注和保存
+        col_note, col_save = st.columns([3, 1])
+        with col_note:
+            notes = st.text_area("实验备注", height=100, placeholder="记录浆体状态、泌水情况、异常现象等", key="paste_notes")
+        
+        with col_save:
+            st.markdown("<br>" * 4, unsafe_allow_html=True)
+            if st.button("💾 保存净浆实验数据", type="primary", use_container_width=True, key="save_paste"):
+                if selected_exp_id:
+                    # 构建数据记录
+                    paste_data = {
+                        "id": str(uuid.uuid4())[:8],
+                        "experiment_id": selected_exp_id,
+                        "record_date": record_date.strftime("%Y-%m-%d"),
+                        "operator": operator,
+                        "sample_id": sample_id,
+                        
+                        # 实验条件
+                        "cement_type": cement_type,
+                        "water_cement_ratio": water_cement_ratio,
+                        "admixture_dosage": admixture_dosage,
+                        "temperature": temperature,
+                        
+                        # 流动度数据
+                        "initial_diameter": initial_diameter,
+                        "initial_time": initial_time,
+                        "flow_30min_dia": flow_30min_dia,
+                        "flow_30min_ret": flow_30min_ret,
+                        "flow_60min_dia": flow_60min_dia,
+                        "flow_60min_ret": flow_60min_ret,
+                        
+                        # 凝结时间
+                        "initial_setting": initial_setting,
+                        "final_setting": final_setting,
+                        
+                        # 备注
+                        "notes": notes,
+                        
+                        # 元数据
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": "paste"
+                    }
+                    
+                    # 保存到数据管理器
+                    if "performance_data" not in data:
+                        data["performance_data"] = {"paste": []}
+                    
+                    if "paste" not in data["performance_data"]:
+                        data["performance_data"]["paste"] = []
+                    
+                    data["performance_data"]["paste"].append(paste_data)
+                    
+                    if data_manager.save_data(data):
+                        st.success("✅ 净浆实验数据保存成功！")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ 保存失败，请重试")
+                else:
+                    st.error("请选择实验项目")
+    
+    # 3. 砂浆实验数据记录
+    with tab3:
+        st.subheader("🏗️ 砂浆实验数据记录")
+        
+        # 创建两列布局
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            # 实验选择
+            exp_options = get_experiment_options("性能测试")
+            if exp_options:
+                selected_exp_key = st.selectbox(
+                    "选择实验项目",
+                    options=list(exp_options.keys()),
+                    key="mortar_exp_select"
+                )
+                selected_exp_id = exp_options.get(selected_exp_key)
+            else:
+                st.warning("暂无性能测试实验项目，请在实验管理中创建")
+                selected_exp_id = None
+            
+            # 基础信息
+            with st.container(border=True):
+                st.markdown("### 基础信息")
+                record_date = st.date_input("记录日期", datetime.now(), key="mortar_date")
+                operator = st.text_input("操作人", value="徐梓馨", key="mortar_operator")
+                sample_id = st.text_input("样品编号", placeholder="例如: MORTAR-001", key="mortar_sample")
+        
+        with col2:
+            # 配合比
+            with st.container(border=True):
+                st.markdown("### 配合比设计")
+                col_mix1, col_mix2 = st.columns(2)
+                with col_mix1:
+                    cement_dosage = st.number_input("水泥用量 (g)", min_value=0, max_value=2000, value=450, step=5, key="mortar_cement")
+                    sand_dosage = st.number_input("砂用量 (g)", min_value=0, max_value=5000, value=1350, step=10, key="mortar_sand")
+                
+                with col_mix2:
+                    water_dosage = st.number_input("水用量 (g)", min_value=0, max_value=1000, value=225, step=5, key="mortar_water")
+                    admixture_dosage = st.number_input("减水剂掺量 (%)", min_value=0.0, max_value=5.0, value=0.18, step=0.01, key="mortar_dosage")
+        
+        # 流动度和强度
+        with st.expander("📊 性能测试", expanded=True):
+            col_perf1, col_perf2 = st.columns(2)
+            
+            with col_perf1:
+                st.markdown("#### 流动度")
+                mortar_flow = st.number_input("砂浆流动度 (mm)", min_value=100, max_value=300, value=180, step=1, key="mortar_flow")
+                flow_retention = st.number_input("流动度保持率 (%)", min_value=0.0, max_value=100.0, value=95.0, step=0.1, key="mortar_flow_ret")
+                
+                st.markdown("#### 保水性")
+                water_retention = st.number_input("保水性 (%)", min_value=0.0, max_value=100.0, value=85.0, step=0.1, key="mortar_water_ret")
+            
+            with col_perf2:
+                st.markdown("#### 抗压强度 (MPa)")
+                strength_1d = st.number_input("1天强度", min_value=0.0, max_value=100.0, value=15.0, step=0.1, key="mortar_strength_1d")
+                strength_3d = st.number_input("3天强度", min_value=0.0, max_value=100.0, value=30.0, step=0.1, key="mortar_strength_3d")
+                strength_7d = st.number_input("7天强度", min_value=0.0, max_value=100.0, value=45.0, step=0.1, key="mortar_strength_7d")
+                strength_28d = st.number_input("28天强度", min_value=0.0, max_value=100.0, value=60.0, step=0.1, key="mortar_strength_28d")
+        
+        # 备注和保存
+        col_note, col_save = st.columns([3, 1])
+        with col_note:
+            notes = st.text_area("实验备注", height=100, placeholder="记录砂浆状态、成型情况、养护条件等", key="mortar_notes")
+        
+        with col_save:
+            st.markdown("<br>" * 4, unsafe_allow_html=True)
+            if st.button("💾 保存砂浆实验数据", type="primary", use_container_width=True, key="save_mortar"):
+                if selected_exp_id:
+                    # 构建数据记录
+                    mortar_data = {
+                        "id": str(uuid.uuid4())[:8],
+                        "experiment_id": selected_exp_id,
+                        "record_date": record_date.strftime("%Y-%m-%d"),
+                        "operator": operator,
+                        "sample_id": sample_id,
+                        
+                        # 配合比
+                        "cement_dosage": cement_dosage,
+                        "sand_dosage": sand_dosage,
+                        "water_dosage": water_dosage,
+                        "admixture_dosage": admixture_dosage,
+                        
+                        # 性能测试
+                        "mortar_flow": mortar_flow,
+                        "flow_retention": flow_retention,
+                        "water_retention": water_retention,
+                        "strength_1d": strength_1d,
+                        "strength_3d": strength_3d,
+                        "strength_7d": strength_7d,
+                        "strength_28d": strength_28d,
+                        
+                        # 备注
+                        "notes": notes,
+                        
+                        # 元数据
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": "mortar"
+                    }
+                    
+                    # 保存到数据管理器
+                    if "performance_data" not in data:
+                        data["performance_data"] = {"mortar": []}
+                    
+                    if "mortar" not in data["performance_data"]:
+                        data["performance_data"]["mortar"] = []
+                    
+                    data["performance_data"]["mortar"].append(mortar_data)
+                    
+                    if data_manager.save_data(data):
+                        st.success("✅ 砂浆实验数据保存成功！")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ 保存失败，请重试")
+                else:
+                    st.error("请选择实验项目")
+    
+    # 4. 混凝土实验数据记录
+    with tab4:
+        st.subheader("🏢 混凝土实验数据记录")
+        
+        # 创建两列布局
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            # 实验选择
+            exp_options = get_experiment_options("性能测试")
+            if exp_options:
+                selected_exp_key = st.selectbox(
+                    "选择实验项目",
+                    options=list(exp_options.keys()),
+                    key="concrete_exp_select"
+                )
+                selected_exp_id = exp_options.get(selected_exp_key)
+            else:
+                st.warning("暂无性能测试实验项目，请在实验管理中创建")
+                selected_exp_id = None
+            
+            # 基础信息
+            with st.container(border=True):
+                st.markdown("### 基础信息")
+                record_date = st.date_input("记录日期", datetime.now(), key="concrete_date")
+                operator = st.text_input("操作人", value="徐梓馨", key="concrete_operator")
+                mix_id = st.text_input("配合比编号", placeholder="例如: MIX-C30-001", key="concrete_mix")
+        
+        with col2:
+            # 配合比设计
+            with st.container(border=True):
+                st.markdown("### 配合比设计 (kg/m³)")
+                col_mix1, col_mix2 = st.columns(2)
+                with col_mix1:
+                    cement = st.number_input("水泥", min_value=0, max_value=1000, value=320, step=5, key="concrete_cement")
+                    sand = st.number_input("砂", min_value=0, max_value=2000, value=750, step=10, key="concrete_sand")
+                    stone = st.number_input("石子", min_value=0, max_value=2500, value=1050, step=10, key="concrete_stone")
+                
+                with col_mix2:
+                    water = st.number_input("水", min_value=0, max_value=300, value=160, step=5, key="concrete_water")
+                    admixture = st.number_input("减水剂", min_value=0.0, max_value=10.0, value=3.2, step=0.1, key="concrete_admixture")
+                    mineral_addition = st.number_input("矿物掺合料", min_value=0, max_value=300, value=80, step=5, key="concrete_mineral")
+        
+        # 新拌混凝土性能
+        with st.expander("🥄 新拌混凝土性能", expanded=True):
+            col_fresh1, col_fresh2, col_fresh3 = st.columns(3)
+            
+            with col_fresh1:
+                st.markdown("#### 工作性")
+                slump = st.number_input("坍落度 (mm)", min_value=0, max_value=300, value=180, step=5, key="concrete_slump")
+                slump_flow = st.number_input("扩展度 (mm)", min_value=300, max_value=800, value=500, step=10, key="concrete_slump_flow")
+            
+            with col_fresh2:
+                st.markdown("#### 含气量与密度")
+                air_content = st.number_input("含气量 (%)", min_value=0.0, max_value=10.0, value=2.5, step=0.1, key="concrete_air")
+                density = st.number_input("表观密度 (kg/m³)", min_value=2000, max_value=3000, value=2350, step=10, key="concrete_density")
+            
+            with col_fresh3:
+                st.markdown("#### 凝结时间")
+                initial_setting = st.number_input("初凝 (h)", min_value=0.0, max_value=24.0, value=4.5, step=0.5, key="concrete_initial_set")
+                final_setting = st.number_input("终凝 (h)", min_value=0.0, max_value=36.0, value=7.5, step=0.5, key="concrete_final_set")
+        
+        # 硬化混凝土性能
+        with st.expander("💪 硬化混凝土性能", expanded=True):
+            col_hard1, col_hard2 = st.columns(2)
+            
+            with col_hard1:
+                st.markdown("#### 抗压强度 (MPa)")
+                strength_3d = st.number_input("3天强度", min_value=0.0, max_value=100.0, value=20.0, step=0.1, key="concrete_strength_3d")
+                strength_7d = st.number_input("7天强度", min_value=0.0, max_value=100.0, value=30.0, step=0.1, key="concrete_strength_7d")
+                strength_28d = st.number_input("28天强度", min_value=0.0, max_value=100.0, value=45.0, step=0.1, key="concrete_strength_28d")
+            
+            with col_hard2:
+                st.markdown("#### 其他性能")
+                flexural_strength = st.number_input("抗折强度 (MPa)", min_value=0.0, max_value=20.0, value=5.5, step=0.1, key="concrete_flexural")
+                shrinkage = st.number_input("收缩率 (×10⁻⁶)", min_value=0, max_value=1000, value=350, step=10, key="concrete_shrinkage")
+                carbonation = st.number_input("碳化深度 (mm)", min_value=0.0, max_value=50.0, value=2.5, step=0.1, key="concrete_carbonation")
+        
+        # 备注和保存
+        col_note, col_save = st.columns([3, 1])
+        with col_note:
+            notes = st.text_area("实验备注", height=100, placeholder="记录混凝土状态、施工性能、养护条件、异常情况等", key="concrete_notes")
+        
+        with col_save:
+            st.markdown("<br>" * 4, unsafe_allow_html=True)
+            if st.button("💾 保存混凝土实验数据", type="primary", use_container_width=True, key="save_concrete"):
+                if selected_exp_id:
+                    # 构建数据记录
+                    concrete_data = {
+                        "id": str(uuid.uuid4())[:8],
+                        "experiment_id": selected_exp_id,
+                        "record_date": record_date.strftime("%Y-%m-%d"),
+                        "operator": operator,
+                        "mix_id": mix_id,
+                        
+                        # 配合比设计
+                        "cement": cement,
+                        "sand": sand,
+                        "stone": stone,
+                        "water": water,
+                        "admixture": admixture,
+                        "mineral_addition": mineral_addition,
+                        
+                        # 新拌混凝土性能
+                        "slump": slump,
+                        "slump_flow": slump_flow,
+                        "air_content": air_content,
+                        "density": density,
+                        "initial_setting": initial_setting,
+                        "final_setting": final_setting,
+                        
+                        # 硬化混凝土性能
+                        "strength_3d": strength_3d,
+                        "strength_7d": strength_7d,
+                        "strength_28d": strength_28d,
+                        "flexural_strength": flexural_strength,
+                        "shrinkage": shrinkage,
+                        "carbonation": carbonation,
+                        
+                        # 备注
+                        "notes": notes,
+                        
+                        # 元数据
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": "concrete"
+                    }
+                    
+                    # 保存到数据管理器
+                    if "performance_data" not in data:
+                        data["performance_data"] = {"concrete": []}
+                    
+                    if "concrete" not in data["performance_data"]:
+                        data["performance_data"]["concrete"] = []
+                    
+                    data["performance_data"]["concrete"].append(concrete_data)
+                    
+                    if data_manager.save_data(data):
+                        st.success("✅ 混凝土实验数据保存成功！")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ 保存失败，请重试")
+                else:
+                    st.error("请选择实验项目")
+    
+    # 数据查看模块
+    st.divider()
+    st.subheader("📊 数据查看")
+    
+    # 使用选项卡查看不同类型的数据
+    view_tab1, view_tab2, view_tab3, view_tab4 = st.tabs(["合成数据", "净浆数据", "砂浆数据", "混凝土数据"])
+    
+    with view_tab1:
+        synthesis_data = data.get("performance_data", {}).get("synthesis", [])
+        if synthesis_data:
+            df = pd.DataFrame(synthesis_data)
+            st.dataframe(df[["record_date", "batch_no", "water_reduction", "solid_content", "ph_value", "operator"]], use_container_width=True)
+        else:
+            st.info("暂无合成实验数据")
+    
+    with view_tab2:
+        paste_data = data.get("performance_data", {}).get("paste", [])
+        if paste_data:
+            df = pd.DataFrame(paste_data)
+            st.dataframe(df[["record_date", "sample_id", "initial_diameter", "flow_30min_dia", "flow_60min_dia", "operator"]], use_container_width=True)
+        else:
+            st.info("暂无净浆实验数据")
+    
+    with view_tab3:
+        mortar_data = data.get("performance_data", {}).get("mortar", [])
+        if mortar_data:
+            df = pd.DataFrame(mortar_data)
+            st.dataframe(df[["record_date", "sample_id", "mortar_flow", "strength_3d", "strength_28d", "operator"]], use_container_width=True)
+        else:
+            st.info("暂无砂浆实验数据")
+    
+    with view_tab4:
+        concrete_data = data.get("performance_data", {}).get("concrete", [])
+        if concrete_data:
+            df = pd.DataFrame(concrete_data)
+            st.dataframe(df[["record_date", "mix_id", "slump", "slump_flow", "strength_28d", "operator"]], use_container_width=True)
+        else:
+            st.info("暂无混凝土实验数据")

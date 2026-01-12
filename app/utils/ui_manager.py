@@ -1,0 +1,229 @@
+
+import streamlit as st
+
+def load_global_css(font_scale=1.0, mobile_optimized=True):
+    """
+    加载全局 CSS 样式，实现响应式设计、字体调节和移动端优化
+    """
+    
+    # 基础字体大小 (px)
+    base_size_px = 16 * font_scale
+    
+    # 移动端优化 CSS
+    mobile_css = ""
+    if mobile_optimized:
+        mobile_css = """
+        /* === 移动端触控优化 (Touch Targets) === */
+        
+        /* 按钮尺寸优化：最小高度 48px，增加点击区域 */
+        .stButton button, .stDownloadButton button, .stFormSubmitButton button {
+            min-height: 48px !important;
+            min-width: 48px !important;
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+            border-radius: 8px !important; /* 更圆润的角 */
+            margin-bottom: 8px !important;
+        }
+        
+        /* 输入框尺寸优化 */
+        .stTextInput input, .stSelectbox div[data-baseweb="select"], .stNumberInput input {
+            min-height: 48px !important;
+            border-radius: 8px !important;
+        }
+        
+        /* 复选框和单选框加大 */
+        .stCheckbox label, .stRadio label {
+            padding-top: 4px !important;
+            padding-bottom: 4px !important;
+        }
+        
+        /* === 响应式布局优化 === */
+        @media (max-width: 768px) {
+            /* 移动端全宽按钮 */
+            .stButton button, .stDownloadButton button, .stFormSubmitButton button {
+                width: 100% !important;
+            }
+            
+            /* 调整页面边距，最大化利用屏幕空间 */
+            .block-container {
+                padding-top: 3rem !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+                padding-bottom: 2rem !important;
+            }
+            
+            /* 标题字号在移动端自动缩小，避免换行过多 */
+            h1 { font-size: 1.75rem !important; }
+            h2 { font-size: 1.5rem !important; }
+            h3 { font-size: 1.25rem !important; }
+        }
+        """
+
+    css = f"""
+    <style>
+    :root {{
+        /* === Design Tokens === */
+        --primary-color: #FF4B4B;
+        --background-color: #FFFFFF;
+        --text-color: #31333F;
+        --font-base-size: {base_size_px}px;
+    }}
+    
+    html {{
+        font-size: var(--font-base-size);
+    }}
+    
+    /* === 全局排版与一致性 === */
+    
+    /* 强制所有文本组件使用相对单位 rem，从而响应 html font-size 变化 */
+    p, .stMarkdown, .stText, .stCode, .stJson {{
+        font-size: 1rem !important; 
+        line-height: 1.6 !important; /* 增加行高提升可读性 */
+    }}
+    
+    /* 标题层级 */
+    h1 {{ font-size: 2.2rem !important; font-weight: 700 !important; margin-bottom: 1.5rem !important; }}
+    h2 {{ font-size: 1.8rem !important; font-weight: 600 !important; margin-top: 1.5rem !important; margin-bottom: 1rem !important; }}
+    h3 {{ font-size: 1.4rem !important; font-weight: 600 !important; }}
+    
+    /* 组件内文字大小适配 */
+    .stButton button, .stTextInput input, .stSelectbox div, .stNumberInput input {{
+        font-size: 1rem !important;
+    }}
+    
+    /* DataFrame/Table 字体适配 */
+    .stDataFrame div {{
+        font-size: 0.9rem !important;
+    }}
+    
+    /* 侧边栏样式微调 */
+    [data-testid="stSidebar"] .block-container {{
+        padding-top: 2rem;
+    }}
+    
+    /* === 桌面端/通用 UI 增强 (Desktop Enhancements) === */
+    
+    /* 1. 指标卡片 (Metric Cards) 美化 */
+    [data-testid="stMetric"] {{
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }}
+    
+    [data-testid="stMetric"]:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        background-color: #ffffff;
+        border-color: var(--primary-color);
+    }}
+    
+    [data-testid="stMetric"] label {{
+        color: #666 !important;
+        font-size: 0.9rem !important;
+    }}
+    
+    [data-testid="stMetric"] [data-testid="stMetricValue"] {{
+        color: var(--primary-color) !important;
+        font-weight: 700 !important;
+    }}
+
+    /* 2. 表格容器 (DataFrame) 美化 */
+    .stDataFrame {{
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    }}
+
+    /* 3. 按钮交互增强 */
+    .stButton button {{
+        transition: all 0.2s ease;
+        border-width: 1px !important;
+    }}
+    
+    .stButton button:hover {{
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }}
+
+    /* 4. 折叠面板 (Expander) 样式 */
+    .streamlit-expanderHeader {{
+        border-radius: 8px !important;
+        background-color: #fcfcfc !important;
+        border: 1px solid #f0f0f0 !important;
+    }}
+    
+    .streamlit-expanderContent {{
+        border: 1px solid #f0f0f0;
+        border-top: none;
+        border-bottom-left-radius: 8px;
+        border-bottom-right-radius: 8px;
+        padding: 1rem !important;
+    }}
+
+    /* 5. 侧边栏背景微调 */
+    [data-testid="stSidebar"] {{
+        background-color: #f8f9fa;
+        border-right: 1px solid #e0e0e0;
+    }}
+
+    {mobile_css}
+    </style>
+    """
+    
+    st.markdown(css, unsafe_allow_html=True)
+
+def render_ui_settings():
+    """
+    在侧边栏渲染 UI 设置面板
+    返回: 当前的 font_scale
+    """
+    # 默认值
+    if 'ui_font_scale' not in st.session_state:
+        st.session_state['ui_font_scale'] = 1.0
+    if 'ui_mobile_mode' not in st.session_state:
+        st.session_state['ui_mobile_mode'] = True
+
+    with st.sidebar:
+        with st.expander("🎨 界面显示设置", expanded=False):
+            st.caption("自定义字体大小与布局")
+            
+            # 1. 字体调节
+            st.markdown("**字体大小**")
+            font_mode = st.select_slider(
+                "选择字号模式",
+                options=["小", "标准", "大", "特大"],
+                value="标准",
+                label_visibility="collapsed"
+            )
+            
+            scale_map = {
+                "小": 0.85,
+                "标准": 1.0,
+                "大": 1.15,
+                "特大": 1.3
+            }
+            
+            # 允许微调
+            use_custom = st.checkbox("启用自定义缩放", value=False)
+            
+            if use_custom:
+                scale = st.slider("缩放比例", 0.7, 1.5, st.session_state['ui_font_scale'], 0.05)
+                st.session_state['ui_font_scale'] = scale
+            else:
+                st.session_state['ui_font_scale'] = scale_map[font_mode]
+            
+            st.divider()
+            
+            # 2. 移动端优化开关
+            st.markdown("**移动端适配**")
+            mobile_mode = st.toggle("触控增强模式", value=st.session_state['ui_mobile_mode'], help="增大按钮和输入框尺寸，适配手机操作")
+            st.session_state['ui_mobile_mode'] = mobile_mode
+            
+            if mobile_mode:
+                st.caption("✅ 已启用大尺寸触控目标")
+    
+    return st.session_state['ui_font_scale'], st.session_state['ui_mobile_mode']
