@@ -165,110 +165,110 @@ def render_raw_material_management(data_manager):
     
     form_id = "raw_add_material"
     
-    # 使用Tabs来分隔单个添加和批量导入
-    tab_single, tab_batch = st.tabs(["➕ 单个添加", "📂 批量导入 (Excel)"])
-    
-    with tab_single:
-        with st.form(f"add_raw_material_form_{form_id}", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                material_name = st.text_input("原材料名称*", key=f"raw_material_name_{form_id}")
-                material_number = st.text_input("物料号*", key=f"raw_material_number_{form_id}")
-                chemical_formula = st.text_input("化学式", key=f"raw_chemical_formula_{form_id}")
-                molecular_weight = st.number_input("分子量 (g/mol)", 
-                                                  min_value=0.0, 
-                                                  step=0.01,
-                                                  key=f"raw_molecular_weight_{form_id}")
-                solid_content = st.number_input("固含 (%)", 
-                                               min_value=0.0, 
-                                               max_value=100.0,
-                                               step=0.1,
-                                               key=f"raw_solid_content_{form_id}")
-            with col2:
-                abbreviation = st.text_input("缩写", key=f"raw_abbreviation_{form_id}")
-                unit_price = st.number_input("单价 (元/吨)", 
-                                            min_value=0.0,
-                                            step=0.1,
-                                            key=f"raw_unit_price_{form_id}")
-                odor = st.selectbox("气味", 
-                                   ["无", "轻微", "中等", "强烈", "刺激性"],
-                                   key=f"raw_odor_{form_id}")
-                storage_condition = st.text_input("存储条件", key=f"raw_storage_condition_{form_id}")
-                supplier = st.text_input("供应商", key=f"raw_supplier_{form_id}")
-            
-            usage_category_options = ["母液合成", "复配和助剂", "速凝剂"]
-            usage_categories = st.multiselect("用途*", usage_category_options, key=f"raw_usage_category_{form_id}")
-            
-            col_inv1, col_inv2 = st.columns(2)
-            
-            # Check if water
-            is_water_add = material_name and "水" in material_name and "减水" not in material_name
-            
-            with col_inv1:
-                if is_water_add:
-                    st.text_input("初始库存", value="N/A (不追踪库存)", disabled=True, key=f"raw_init_stock_disp_{form_id}")
-                    initial_stock = 0.0
-                else:
-                    initial_stock = st.number_input("初始库存", min_value=0.0, step=0.00001, format="%g", key=f"raw_init_stock_{form_id}")
-            
-            with col_inv2:
-                stock_unit = st.text_input("单位 (e.g., kg, ton)", value="ton", key=f"raw_unit_{form_id}")
-
-            main_usage = st.text_area("详细用途描述", height=60, key=f"raw_main_usage_{form_id}")
-            
-            # 使用表单提交按钮
-            submitted = st.form_submit_button("添加原材料", type="primary")
-            if submitted:
-                if material_name and material_number and usage_categories:
-                    # 检查物料号是否重复
-                    existing_numbers = [m.get("material_number") for m in raw_materials if m.get("material_number")]
-                    if material_number in existing_numbers:
-                        st.error(f"物料号 '{material_number}' 已存在！")
+    with st.expander("➕ 单个添加 | 📂 批量导入 (Excel)", expanded=False):
+        tab_single, tab_batch = st.tabs(["➕ 单个添加", "📂 批量导入 (Excel)"])
+        
+        with tab_single:
+            with st.form(f"add_raw_material_form_{form_id}", clear_on_submit=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    material_name = st.text_input("原材料名称*", key=f"raw_material_name_{form_id}")
+                    material_number = st.text_input("物料号*", key=f"raw_material_number_{form_id}")
+                    chemical_formula = st.text_input("化学式", key=f"raw_chemical_formula_{form_id}")
+                    molecular_weight = st.number_input("分子量 (g/mol)", 
+                                                      min_value=0.0, 
+                                                      step=0.01,
+                                                      key=f"raw_molecular_weight_{form_id}")
+                    solid_content = st.number_input("固含 (%)", 
+                                                   min_value=0.0, 
+                                                   max_value=100.0,
+                                                   step=0.1,
+                                                   key=f"raw_solid_content_{form_id}")
+                with col2:
+                    abbreviation = st.text_input("缩写", key=f"raw_abbreviation_{form_id}")
+                    unit_price = st.number_input("单价 (元/吨)", 
+                                                min_value=0.0,
+                                                step=0.1,
+                                                key=f"raw_unit_price_{form_id}")
+                    odor = st.selectbox("气味", 
+                                       ["无", "轻微", "中等", "强烈", "刺激性"],
+                                       key=f"raw_odor_{form_id}")
+                    storage_condition = st.text_input("存储条件", key=f"raw_storage_condition_{form_id}")
+                    supplier = st.text_input("供应商", key=f"raw_supplier_{form_id}")
+                
+                usage_category_options = ["母液合成", "复配和助剂", "速凝剂"]
+                usage_categories = st.multiselect("用途*", usage_category_options, key=f"raw_usage_category_{form_id}")
+                
+                col_inv1, col_inv2 = st.columns(2)
+                
+                # Check if water
+                is_water_add = material_name and "水" in material_name and "减水" not in material_name
+                
+                with col_inv1:
+                    if is_water_add:
+                        st.text_input("初始库存", value="N/A (不追踪库存)", disabled=True, key=f"raw_init_stock_disp_{form_id}")
+                        initial_stock = 0.0
                     else:
-                        # 检查名称+供应商是否重复
-                        duplicate_exists = False
-                        for m in raw_materials:
-                            if m.get("name") == material_name and m.get("supplier") == supplier:
-                                duplicate_exists = True
-                                break
-                        
-                        if duplicate_exists:
-                            st.error(f"原材料 '{material_name}' (供应商: {supplier}) 已存在！")
-                        else:
-                            new_material = {
-                                "name": material_name,
-                                "material_number": material_number,
-                                "abbreviation": abbreviation,
-                                "chemical_formula": chemical_formula,
-                                "molecular_weight": molecular_weight,
-                                "solid_content": solid_content,
-                                "unit_price": unit_price,
-                                "odor": odor,
-                                "storage_condition": storage_condition,
-                                "supplier": supplier,
-                                "usage_category": ",".join(usage_categories),
-                                "main_usage": main_usage,
-                                "stock_quantity": initial_stock,
-                                "unit": stock_unit,
-                                "created_date": datetime.now().strftime("%Y-%m-%d")
-                            }
-                            success, msg = data_manager.add_raw_material(new_material)
-                            if success:
-                                # If initial stock > 0, add an inventory record too
-                                if initial_stock > 0:
-                                    # We need the ID of the newly added material. 
-                                    pass
-                                
-                                st.success(f"原材料 '{material_name}' 添加成功！")
-                                time.sleep(0.5)
-                                st.rerun()
-                            else:
-                                st.error(f"添加失败: {msg}")
-                else:
-                    st.error("请填写带*的必填项 (名称、物料号、用途)")
+                        initial_stock = st.number_input("初始库存", min_value=0.0, step=0.00001, format="%g", key=f"raw_init_stock_{form_id}")
+                
+                with col_inv2:
+                    stock_unit = st.text_input("单位 (e.g., kg, ton)", value="ton", key=f"raw_unit_{form_id}")
 
-    with tab_batch:
-        _render_batch_import(data_manager)
+                main_usage = st.text_area("详细用途描述", height=60, key=f"raw_main_usage_{form_id}")
+                
+                # 使用表单提交按钮
+                submitted = st.form_submit_button("添加原材料", type="primary")
+                if submitted:
+                    if material_name and material_number and usage_categories:
+                        # 检查物料号是否重复
+                        existing_numbers = [m.get("material_number") for m in raw_materials if m.get("material_number")]
+                        if material_number in existing_numbers:
+                            st.error(f"物料号 '{material_number}' 已存在！")
+                        else:
+                            # 检查名称+供应商是否重复
+                            duplicate_exists = False
+                            for m in raw_materials:
+                                if m.get("name") == material_name and m.get("supplier") == supplier:
+                                    duplicate_exists = True
+                                    break
+                            
+                            if duplicate_exists:
+                                st.error(f"原材料 '{material_name}' (供应商: {supplier}) 已存在！")
+                            else:
+                                new_material = {
+                                    "name": material_name,
+                                    "material_number": material_number,
+                                    "abbreviation": abbreviation,
+                                    "chemical_formula": chemical_formula,
+                                    "molecular_weight": molecular_weight,
+                                    "solid_content": solid_content,
+                                    "unit_price": unit_price,
+                                    "odor": odor,
+                                    "storage_condition": storage_condition,
+                                    "supplier": supplier,
+                                    "usage_category": ",".join(usage_categories),
+                                    "main_usage": main_usage,
+                                    "stock_quantity": initial_stock,
+                                    "unit": stock_unit,
+                                    "created_date": datetime.now().strftime("%Y-%m-%d")
+                                }
+                                success, msg = data_manager.add_raw_material(new_material)
+                                if success:
+                                    # If initial stock > 0, add an inventory record too
+                                    if initial_stock > 0:
+                                        # We need the ID of the newly added material. 
+                                        pass
+                                    
+                                    st.success(f"原材料 '{material_name}' 添加成功！")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.error(f"添加失败: {msg}")
+                    else:
+                        st.error("请填写带*的必填项 (名称、物料号、用途)")
+        
+        with tab_batch:
+            _render_batch_import(data_manager)
     
     # 库存操作区域
     with st.expander("🏭 库存操作 (入库/出库)", expanded=False):
