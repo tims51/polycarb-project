@@ -663,7 +663,19 @@ def _render_inventory_reports(data_manager):
     with tab_ledger:
         records = data_manager.get_inventory_records()
         if records:
-            df = pd.DataFrame(records)
+            # 补充物料名称 (解决 KeyError: 'material_name')
+            materials = data_manager.get_all_raw_materials()
+            mat_map = {m['id']: m['name'] for m in materials}
+            
+            enriched_records = []
+            for r in records:
+                r_copy = r.copy()
+                if "material_name" not in r_copy:
+                    # 尝试从 map 获取，如果没有则显示 ID
+                    r_copy["material_name"] = mat_map.get(r_copy.get("material_id"), f"Unknown-{r_copy.get('material_id')}")
+                enriched_records.append(r_copy)
+                
+            df = pd.DataFrame(enriched_records)
             
             # 1. 增加筛选器
             col_f1, col_f2, col_f3 = st.columns(3)
