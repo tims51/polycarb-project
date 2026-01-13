@@ -7,15 +7,18 @@ def render_sap_bom(data_manager):
     """渲染 SAP/BOM 管理页面"""
     st.header("🏭 SAP/BOM 管理")
     
-    tab1, tab2, tab3 = st.tabs(["🧬 BOM 管理", "🏭 生产管理", "📈 台账报表"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🧬 BOM 管理", "🏭 生产管理", "🚚 发货管理", "📈 台账报表"])
     
     with tab1:
         _render_bom_management(data_manager)
     
     with tab2:
         _render_production_management(data_manager)
-        
+
     with tab3:
+        _render_shipping_management(data_manager)
+        
+    with tab4:
         _render_inventory_reports(data_manager)
 
 def _render_bom_management(data_manager):
@@ -607,9 +610,103 @@ def _render_production_management(data_manager):
             if order.get('status') == 'issued': # 已领料
                 st.divider()
                 if st.button("🏁 完工入库 (Finish)"):
-                     data_manager.update_production_order(order['id'], {"status": "finished"})
-                     st.success("订单已完工")
-                     st.rerun()
+                     # 使用新方法，自动更新成品库存
+                     success, msg = data_manager.finish_production_order(order['id'])
+                     if success:
+                         st.success(msg)
+                         st.rerun()
+                     else:
+                         st.error(msg)
+
+def _render_shipping_management(data_manager):
+    st.subheader("发货管理")
+    
+    # 1. 发货操作区域
+    st.markdown("#### 📦 新增发货单")
+    
+    # 获取成品库存列表
+    inventory = data_manager.get_product_inventory()
+    if not inventory:
+        st.warning("暂无成品库存，无法进行发货操作。请先进行生产入库。")
+    else:
+        with st.form("shipping_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                # 构造选项: "名称 (库存: 100 吨)"
+                prod_options = {f"{p['name']} ({p.get('type', '-')}) - 库存: {float(p.get('stock_quantity', 0)):.2f} {p.get('unit', '吨')}": p for p in inventory}
+                sel_label = st.selectbox("选择发货产品", list(prod_options.keys()))
+                
+            with col2:
+                ship_qty = st.number_input("发货数量 (吨)", min_value=0.01, step=0.1)
+            
+            col3, col4 = st.columns(2)
+            with col3:
+                customer = st.text_input("客户名称 / 目的地")
+            with col4:
+                ship_date = st.date_input("发货日期", datetime.now())
+                
+            remark = st.text_input("备注 (订单号/物流单号)")
+            
+            submitted = st.form_submit_button("确认发货", type="primary")
+            
+            if submitted:
+                if not customer:
+                    st.error("请填写客户名称")
+                else:
+                    selected_prod = prod_options[sel_label]
+                    current_stock = float(selected_prod.get('stock_quantity', 0))
+                    
+                    if ship_qty > current_stock:
+                        st.error(f"库存不足！当前库存: {current_stock:.2f} 吨")
+                    else:
+                        # 构造记录数据
+                        record_data = {
+                            "product_name": selected_prod['name'],
+                            "product_type": selected_prod.get('type', '其他'),
+                            "quantity": ship_qty,
+                            "type": "out", # 出库
+                            "reason": f"发货: {customer} {remark}",
+                            "operator": "User", # 实际应获取当前用户
+                            "date": ship_date.strftime("%Y-%m-%d"),
+                            "related_doc_type": "SHIPPING"
+                        }
+                        
+                        success, msg = data_manager.add_product_inventory_record(record_data)
+                        if success:
+                            st.success(f"发货成功！已扣减库存 {ship_qty} 吨")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+    # 2. 发货记录列表
+    st.divider()
+    st.markdown("#### 📜 近期发货记录")
+    
+    records = data_manager.get_product_inventory_records()
+    # 筛选出 type='out' 且 reason 包含 '发货' 的记录 (简单筛选)
+    # 或者所有 out 记录? 用户可能也想看其他出库。
+    # 这里我们筛选 type='out'
+    shipping_records = [r for r in records if r.get('type') == 'out']
+    
+    if shipping_records:
+        # 按时间倒序
+        shipping_records.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        
+        df_ship = pd.DataFrame(shipping_records)
+        # 选取展示列
+        cols = ["date", "product_name", "product_type", "quantity", "reason", "operator", "snapshot_stock"]
+        # 确保列存在
+        display_cols = [c for c in cols if c in df_ship.columns]
+        
+        df_display = df_ship[display_cols].copy()
+        df_display.columns = [c.replace("date", "日期").replace("product_name", "产品名称")
+                              .replace("product_type", "类型").replace("quantity", "数量(吨)")
+                              .replace("reason", "详情/备注").replace("operator", "操作人")
+                              .replace("snapshot_stock", "发货后结存") for c in df_display.columns]
+        
+        st.dataframe(df_display, use_container_width=True)
+    else:
+        st.info("暂无发货记录")
 
 def _render_inventory_reports(data_manager):
     st.subheader("库存台账报表")

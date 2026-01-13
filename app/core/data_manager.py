@@ -1113,6 +1113,111 @@ class DataManager:
             return False, "保存失败"
         return False, "删除未生效"
 
+    def finish_production_order(self, order_id, operator="User"):
+        """
+        完工入库：
+        1. 更新生产单状态为 finished
+        2. 根据 BOM 对应的成品，增加成品库存
+        3. 记录成品入库流水
+        """
+        data = self.load_data()
+        orders = data.get("production_orders", [])
+        inventory = data.get("product_inventory", [])
+        records = data.get("product_inventory_records", [])
+        boms = data.get("boms", [])
+        
+        target_order = None
+        target_idx = -1
+        for i, o in enumerate(orders):
+            if o.get("id") == order_id:
+                target_order = o
+                target_idx = i
+                break
+        
+        if not target_order: return False, "生产单不存在"
+        if target_order.get("status") == "finished": return False, "生产单已完工"
+        
+        # 获取计划产量 (这里简化为实际产量=计划产量，实际应用可能需要输入实际产量)
+        plan_qty = float(target_order.get("plan_qty", 0.0))
+        if plan_qty <= 0: return False, "计划产量无效"
+        
+        # 查找对应的 BOM 信息以确定产品名称和类型
+        bom_id = target_order.get("bom_id")
+        target_bom = next((b for b in boms if b.get("id") == bom_id), None)
+        
+        if not target_bom: return False, "关联 BOM 不存在"
+        
+        product_name = target_bom.get("bom_name")
+        # 映射 BOM 类型到产品类型
+        # BOM: 母液, 成品, 速凝剂, 防冻剂
+        # Product: 母液, 成品, 速凝剂, 防冻剂, 其他
+        product_type = target_bom.get("bom_type", "其他")
+        
+        # 在 product_inventory 中查找对应产品
+        target_prod_idx = -1
+        for i, p in enumerate(inventory):
+            if p.get("name") == product_name and p.get("type") == product_type:
+                target_prod_idx = i
+                break
+        
+        # 如果产品不存在，自动创建
+        if target_prod_idx == -1:
+            new_prod_id = max([p.get("id", 0) for p in inventory], default=0) + 1
+            new_prod = {
+                "id": new_prod_id,
+                "name": product_name,
+                "type": product_type,
+                "stock_quantity": 0.0,
+                "unit": "吨", # 默认单位
+                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            inventory.append(new_prod)
+            target_prod_idx = len(inventory) - 1
+        
+        # 更新库存
+        # 注意单位转换：生产单通常是 kg，产品库存是 吨
+        prod_unit = inventory[target_prod_idx].get("unit", "吨")
+        # 假设生产单 plan_qty 单位是 kg (我们在 sap_bom.py 中已经注明了 kg)
+        final_qty, success = convert_quantity(plan_qty, "kg", prod_unit)
+        
+        if not success:
+             # 如果转换失败（比如单位不兼容），默认直接加，但记录警告
+             logger.warning(f"Finish production unit conversion failed: {plan_qty} kg -> {prod_unit}")
+             final_qty = plan_qty
+        
+        current_stock = float(inventory[target_prod_idx].get("stock_quantity", 0.0))
+        new_stock = current_stock + final_qty
+        inventory[target_prod_idx]["stock_quantity"] = new_stock
+        inventory[target_prod_idx]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 记录流水
+        new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+        records.append({
+            "id": new_rec_id,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "product_name": product_name,
+            "product_type": product_type,
+            "type": "in",
+            "quantity": final_qty,
+            "reason": f"生产完工: {target_order.get('order_code')}",
+            "operator": operator,
+            "snapshot_stock": new_stock,
+            "batch_number": target_order.get('order_code') # 使用生产单号作为批次号
+        })
+        
+        # 更新订单状态
+        orders[target_idx]["status"] = "finished"
+        orders[target_idx]["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        data["production_orders"] = orders
+        data["product_inventory"] = inventory
+        data["product_inventory_records"] = records
+        
+        if self.save_data(data):
+            return True, f"完工入库成功，库存增加 {final_qty:.3f} {prod_unit}"
+        return False, "保存失败"
+
     def create_issue_from_order(self, order_id):
         """
         根据生产单创建领料单（建议）
