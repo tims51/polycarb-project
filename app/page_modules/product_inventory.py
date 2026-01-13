@@ -143,13 +143,17 @@ def render_product_inventory_page(data_manager):
                     if success:
                         st.success(f"操作成功: {op_name} {op_type} {op_qty}吨")
                         
-                        # 手动清空 session state 中绑定的 key
-                        if "inv_op_name_txt" in st.session_state: st.session_state["inv_op_name_txt"] = ""
-                        # selectbox 无法轻易重置为 index 0，除非删除 key
-                        if "inv_op_name_sel" in st.session_state: del st.session_state["inv_op_name_sel"]
-                        if "inv_op_qty" in st.session_state: st.session_state["inv_op_qty"] = 0.0
-                        if "inv_op_reason" in st.session_state: st.session_state["inv_op_reason"] = ""
-                        if "inv_op_batch" in st.session_state: st.session_state["inv_op_batch"] = ""
+                        # 不再直接修改 session_state 中的值来清空组件，而是通过 key 删除状态或 rerun
+                        # 简单的 rerun 会保留 input 的值，除非使用 clear_on_submit=True (但这里是 st.form_submit_button, 不是 st.form)
+                        # 等等，上面使用的是 st.form("inv_op_form", clear_on_submit=True) 吗？
+                        # 查看上下文，第 88 行：with st.form("inv_op_form", clear_on_submit=False): 
+                        # 应该改为 True 就可以自动清空了，或者使用回调函数
+                        
+                        # 修复方案：删除 session_state 中的 key，让组件在 rerun 时重置
+                        keys_to_reset = ["inv_op_name_txt", "inv_op_name_sel", "inv_op_qty", "inv_op_reason", "inv_op_batch"]
+                        for k in keys_to_reset:
+                            if k in st.session_state:
+                                del st.session_state[k]
                         
                         st.rerun()
                     else:
