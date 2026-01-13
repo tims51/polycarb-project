@@ -22,34 +22,41 @@ def render_product_inventory_page(data_manager):
     
     # 2. 库存操作区 (入库/发货)
     with st.expander("📝 库存操作 (生产入库 / 发货出库)", expanded=True):
+        # 移出 st.form 的控制组件，以便即时响应
+        c_ctrl1, c_ctrl2 = st.columns([1, 1])
+        with c_ctrl1:
+            op_category = st.selectbox("产品类型*", categories + ["其他"], key="inv_op_cat")
+        
+        # 获取该类别下的现有产品列表
+        existing_products = [item['name'] for item in inventory if item.get('type') == op_category]
+        
+        product_mode = "新增产品"
+        if existing_products:
+            with c_ctrl2:
+                # 使用 radio 选择模式
+                product_mode = st.radio("选择产品", ["选择现有", "新增产品"], horizontal=True, key="inv_op_mode")
+
         with st.form("product_op_form", clear_on_submit=True):
             c1, c2, c3 = st.columns([1.5, 1.5, 1])
             
             with c1:
-                # 产品类型选择
-                op_category = st.selectbox("产品类型*", categories + ["其他"])
-                
-                # 产品名称 (可以是现有产品，也可以是输入新名称)
-                # 获取该类别下的现有产品列表
-                existing_products = [item['name'] for item in inventory if item.get('type') == op_category]
-                if existing_products:
-                    product_mode = st.radio("选择产品", ["选择现有", "新增产品"], horizontal=True, label_visibility="collapsed")
-                    if product_mode == "选择现有":
-                        # 添加一个空白选项作为默认值
-                        op_name = st.selectbox("产品名称*", [""] + existing_products, index=0)
-                    else:
-                        op_name = st.text_input("输入新产品名称*")
+                # 根据外部状态显示不同的输入组件
+                if product_mode == "选择现有" and existing_products:
+                    # 添加一个空白选项作为默认值
+                    op_name = st.selectbox("产品名称*", [""] + existing_products, index=0, key="inv_op_name_sel")
                 else:
-                    st.info(f"该分类下暂无产品，请直接输入名称")
-                    op_name = st.text_input("产品名称*")
+                    placeholder = "输入新产品名称*"
+                    if not existing_products: 
+                        placeholder = f"该分类暂无产品，请输入名称*"
+                    op_name = st.text_input(placeholder, key="inv_op_name_txt")
             
             with c2:
-                op_type = st.selectbox("操作类型*", ["生产入库", "发货出库", "盘点调整"])
-                op_qty = st.number_input("数量 (吨)*", min_value=0.0, step=0.01, format="%.2f")
+                op_type = st.selectbox("操作类型*", ["生产入库", "发货出库", "盘点调整"], key="inv_op_type")
+                op_qty = st.number_input("数量 (吨)*", min_value=0.0, step=0.01, format="%.2f", key="inv_op_qty")
                 
             with c3:
-                op_date = st.date_input("日期", datetime.now())
-                op_reason = st.text_input("备注 / 客户 / 订单号")
+                op_date = st.date_input("日期", datetime.now(), key="inv_op_date")
+                op_reason = st.text_input("备注 / 客户 / 订单号", key="inv_op_reason")
             
             submitted = st.form_submit_button("提交", type="primary", use_container_width=True)
             
@@ -64,12 +71,6 @@ def render_product_inventory_page(data_manager):
                     if op_type == "发货出库":
                         internal_type = "out"
                     elif op_type == "盘点调整":
-                        # 暂时简化处理，需结合现有库存判断是in还是out，这里假设用户自己输入正数表示变动量
-                        # 为了严谨，建议盘点使用调整单。这里简化为直接入/出
-                        # 我们让用户选择是 盘盈(in) 还是 盘亏(out) ? 
-                        # 简单起见，这里默认入库，用户可以在备注说明。
-                        # 或者我们强制用户在数量上体现正负? 不，UI上是绝对值。
-                        # 让我们把“盘点调整”去掉，或者拆分为 盘盈入库 / 盘亏出库
                         pass
                     
                     # 重新映射类型
