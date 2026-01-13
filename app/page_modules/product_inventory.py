@@ -199,7 +199,7 @@ def render_product_inventory_page(data_manager):
             column_config={
                 "id": None, # 隐藏 ID
                 "name": st.column_config.TextColumn("产品名称", required=True),
-                "type": st.column_config.SelectColumn("分类", options=categories, required=True),
+                "type": st.column_config.SelectboxColumn("分类", options=categories, required=True),
                 "stock_quantity": st.column_config.NumberColumn("当前库存", disabled=True, format="%.2f 吨"),
                 "min_stock": st.column_config.NumberColumn("最低库存", min_value=0.0, step=0.1, format="%.2f"),
                 "max_stock": st.column_config.NumberColumn("最高库存", min_value=0.0, step=0.1, format="%.2f"),
