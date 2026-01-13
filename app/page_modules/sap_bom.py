@@ -422,8 +422,11 @@ def _render_production_management(data_manager):
             # 简单表格 (按创建时间倒序)
             orders.sort(key=lambda x: x.get('created_at', ''), reverse=True)
             
+            # 格式化显示
+            df_orders = pd.DataFrame(orders)[["id", "order_code", "status", "plan_qty", "created_at"]]
+            df_orders.columns = ["ID", "生产单号", "状态", "计划产量 (kg)", "创建时间"]
             st.dataframe(
-                pd.DataFrame(orders)[["id", "order_code", "status", "plan_qty", "created_at"]],
+                df_orders,
                 use_container_width=True
             )
             
@@ -452,7 +455,7 @@ def _render_production_management(data_manager):
             bom_opts = {f"{b['bom_code']} {b['bom_name']}": b for b in boms}
             sel_bom_label = st.selectbox("选择产品 BOM", list(bom_opts.keys()))
             
-            plan_qty = st.number_input("计划产量", min_value=0.0, step=100.0, value=1000.0)
+            plan_qty = st.number_input("计划产量 (kg)", min_value=0.0, step=100.0, value=1000.0)
             
             # 生产模式
             prod_mode = st.radio("生产模式", ["自产", "代工"], horizontal=True)
@@ -533,11 +536,11 @@ def _render_production_management(data_manager):
             if mode == "代工":
                 mode_text += f" | 厂家: {order.get('oem_manufacturer', '-')}"
             
-            st.caption(f"状态: {order.get('status')} | 计划产量: {order.get('plan_qty')} | {mode_text}")
+            st.caption(f"状态: {order.get('status')} | 计划产量: {order.get('plan_qty')} kg | {mode_text}")
             
             # 编辑计划产量 (仅限 Draft 状态)
             if order.get('status') == 'draft':
-                 new_qty = st.number_input("修改计划产量", value=float(order.get('plan_qty')), min_value=0.0, step=100.0)
+                 new_qty = st.number_input("修改计划产量 (kg)", value=float(order.get('plan_qty')), min_value=0.0, step=100.0)
                  if new_qty != float(order.get('plan_qty')):
                      if st.button("保存产量修改"):
                          data_manager.update_production_order(order['id'], {"plan_qty": new_qty})
