@@ -223,6 +223,8 @@ def _render_bom_detail(data_manager, bom):
                 _render_version_editor(data_manager, ver, mat_options)
 
 def _render_version_editor(data_manager, version, mat_options):
+    current_lines = version.get("lines", [])
+
     col1, col2 = st.columns(2)
     with col1:
         eff_from = st.date_input("生效日期", 
@@ -231,18 +233,46 @@ def _render_version_editor(data_manager, version, mat_options):
     with col2:
         yield_base = st.number_input("基准产量 (kg)", value=float(version.get("yield_base", 1000.0)), key=f"yield_{version['id']}")
     
+    # 实时显示总量校验
+    total_qty_display = sum(float(line.get('qty', 0)) for line in current_lines)
+    diff = total_qty_display - yield_base
+    
+    c_m1, c_m2, c_m3 = st.columns(3)
+    c_m1.metric("当前物料总量", f"{total_qty_display:.3f} kg")
+    c_m2.metric("设定基准产量", f"{yield_base:.3f} kg")
+    c_m3.metric("差异", f"{diff:.3f} kg", delta_color="normal" if abs(diff) < 1e-6 else "inverse")
+
     # 更新头信息按钮
     if st.button("更新版本头信息", key=f"save_head_{version['id']}"):
-        data_manager.update_bom_version(version['id'], {
-            "effective_from": eff_from.strftime("%Y-%m-%d"),
-            "yield_base": yield_base
-        })
-        st.success("已保存")
+        # 1) 计算当前明细总量
+        total_qty = sum(float(line.get('qty', 0)) for line in current_lines)
+        # 2) 校验
+        if abs(total_qty - yield_base) > 1e-6:   # 允许 0.000001 误差
+            st.error(f"物料总量 {total_qty:.3f} kg 与基准产量 {yield_base} kg 不一致，请先调整明细或输入管理员密码强制保存")
+            # 3) 密码输入框
+            with st.form(key=f"pwd_force_head_{version['id']}"):
+                pwd = st.text_input("管理员密码", type="password", placeholder="默认 admin")
+                submitted = st.form_submit_button("强制保存")
+                if submitted and pwd == "admin":
+                    data_manager.update_bom_version(version['id'], {
+                        "effective_from": eff_from.strftime("%Y-%m-%d"),
+                        "yield_base": yield_base
+                    })
+                    st.success("已强制保存")
+                    st.rerun()
+                elif submitted:
+                    st.error("密码错误")
+        else:
+            data_manager.update_bom_version(version['id'], {
+                "effective_from": eff_from.strftime("%Y-%m-%d"),
+                "yield_base": yield_base
+            })
+            st.success("已保存")
+            st.rerun()
     
     st.markdown("##### BOM 明细")
     
     # 使用 data_editor 编辑明细
-    current_lines = version.get("lines", [])
     
     # 转换为 DataFrame 方便编辑
     # 结构: item_id (dropdown), qty, uom, phase, remark

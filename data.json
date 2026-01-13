@@ -1501,9 +1501,45 @@
             "lines": [
                 {
                     "item_type": "raw_material",
+                    "item_id": 6,
+                    "item_name": "615功单",
+                    "qty": 7.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 7,
+                    "item_name": "双氧水",
+                    "qty": 3.3,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 9,
+                    "item_name": "维生素C",
+                    "qty": 0.5,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 8,
+                    "item_name": "巯基丙酸",
+                    "qty": 1.7,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
                     "item_id": 1,
-                    "item_name": "6碳聚醚大单体",
-                    "qty": 360.0,
+                    "item_name": "六碳聚醚大单体",
+                    "qty": 425.0,
                     "uom": "kg",
                     "phase": "",
                     "remark": ""
@@ -1512,7 +1548,16 @@
                     "item_type": "raw_material",
                     "item_id": 3,
                     "item_name": "丙烯酸",
-                    "qty": 60.0,
+                    "qty": 45.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 20,
+                    "item_name": "MA350",
+                    "qty": 5.0,
                     "uom": "kg",
                     "phase": "",
                     "remark": ""
@@ -1521,16 +1566,7 @@
                     "item_type": "raw_material",
                     "item_id": 2,
                     "item_name": "水",
-                    "qty": 200.0,
-                    "uom": "kg",
-                    "phase": "",
-                    "remark": ""
-                },
-                {
-                    "item_type": "raw_material",
-                    "item_id": 4,
-                    "item_name": "丙烯酸羟乙酯",
-                    "qty": 380.0,
+                    "qty": 460.0,
                     "uom": "kg",
                     "phase": "",
                     "remark": ""
@@ -1547,6 +1583,124 @@
             "lines": [],
             "id": 2,
             "created_at": "2026-01-12 23:11:01"
+        },
+        {
+            "bom_id": 2,
+            "version": "V1",
+            "effective_from": "2026-01-13",
+            "yield_base": 1000.0,
+            "lines": [],
+            "id": 3,
+            "created_at": "2026-01-13 10:01:10"
+        },
+        {
+            "bom_id": 7,
+            "version": "V1",
+            "effective_from": "2026-01-13",
+            "yield_base": 1000.0,
+            "lines": [
+                {
+                    "item_type": "raw_material",
+                    "item_id": 1,
+                    "item_name": "六碳聚醚大单体",
+                    "qty": 355.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 6,
+                    "item_name": "615功单",
+                    "qty": 7.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 7,
+                    "item_name": "双氧水",
+                    "qty": 2.9,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 9,
+                    "item_name": "维生素C",
+                    "qty": 0.4,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 8,
+                    "item_name": "巯基丙酸",
+                    "qty": 1.3,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 3,
+                    "item_name": "丙烯酸",
+                    "qty": 33.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 11,
+                    "item_name": "片碱",
+                    "qty": 45.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 275.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 60.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 40.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 1,
+                    "item_name": "六碳聚醚大单体",
+                    "qty": 180.4,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                }
+            ],
+            "id": 4,
+            "created_at": "2026-01-13 10:01:36"
         }
     ],
     "production_orders": [],
