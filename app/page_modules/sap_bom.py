@@ -309,22 +309,43 @@ def _render_version_editor(data_manager, version, mat_options):
                 elif submitted:
                     st.error("密码错误")
         else:
+            # 获取原材料和产品(BOM)选项
+            raw_materials = data_manager.get_all_raw_materials()
+            products = data_manager.get_all_boms()
+            
+            combined_options = {}
+            for m in raw_materials:
+                label = f"[原材料] {m['name']} ({m.get('material_number', '-')})"
+                combined_options[label] = f"raw_material:{m['id']}"
+            for p in products:
+                label = f"[产品] {p['bom_name']} ({p.get('bom_code', '-')})"
+                combined_options[label] = f"product:{p['id']}"
+
             with st.form(f"add_line_form_{version['id']}", clear_on_submit=True):
                 lc1, lc2, lc3 = st.columns([3, 1, 1])
                 with lc1:
-                    sel_mat_label = st.selectbox("选择原材料", list(mat_options.keys()))
+                    sel_item_label = st.selectbox("选择物料 (原材料/产品)", list(combined_options.keys()))
                 with lc2:
                     l_qty = st.number_input("数量", min_value=0.0, step=0.1)
                 with lc3:
                     l_phase = st.text_input("阶段 (e.g. A料)", value="")
                 submitted = st.form_submit_button("添加")
                 if submitted:
-                    mat_id = mat_options[sel_mat_label]
-                    mat_name = sel_mat_label.split(' (')[0]
+                    type_id_str = combined_options[sel_item_label]
+                    item_type, item_id = type_id_str.split(":")
+                    
+                    # 提取名称
+                    item_name = sel_item_label
+                    if "]" in item_name:
+                         try:
+                             item_name = item_name.split("] ", 1)[1].rsplit(" (", 1)[0]
+                         except:
+                             pass
+                    
                     new_line = {
-                        "item_type": "raw_material",
-                        "item_id": mat_id,
-                        "item_name": mat_name,
+                        "item_type": item_type,
+                        "item_id": int(item_id),
+                        "item_name": item_name,
                         "qty": l_qty,
                         "uom": "kg",
                         "phase": l_phase,

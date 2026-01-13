@@ -1136,6 +1136,11 @@ class DataManager:
         issues = data.get("material_issues", [])
         new_id = max([i.get("id", 0) for i in issues], default=0) + 1
         
+        # 确保行项目包含 item_type
+        for line in lines:
+            if "item_type" not in line:
+                line["item_type"] = "raw_material" # 默认值，兼容旧数据
+        
         issue_data = {
             "id": new_id,
             "issue_code": f"ISS-{datetime.now().strftime('%Y%m%d')}-{new_id:04d}",
@@ -1180,7 +1185,7 @@ class DataManager:
         领料过账：
         1. 锁定领料单 status=posted
         2. 生成 inventory_records (type=consume_out)
-        3. 更新库存
+        3. 更新库存 (支持原材料和产品)
         """
         data = self.load_data()
         issues = data.get("material_issues", [])
@@ -1195,7 +1200,9 @@ class DataManager:
         
         # 准备批量写入台账
         records = data.get("inventory_records", [])
+        product_records = data.get("product_inventory_records", [])
         materials = data.get("raw_materials", [])
+        products = data.get("product_inventory", [])
         
         # 遍历行项目
         for line in target_issue.get("lines", []):
@@ -1204,63 +1211,105 @@ class DataManager:
             
             mid = line.get("item_id")
             line_uom = line.get("uom", "kg")
+            item_type = line.get("item_type", "raw_material") # 默认为原材料
             
-            # 更新原材料库存
-            current_stock = 0.0
-            mat_idx = -1
-            is_water = False
-            
-            for idx, m in enumerate(materials):
-                if m.get("id") == mid:
-                    current_stock = float(m.get("stock_quantity", 0.0))
-                    mat_name = m.get("name", "").strip()
-                    water_names = ["水", "自来水", "纯水", "去离子水", "工业用水", "生产用水"]
-                    is_water = mat_name in water_names
-                    mat_idx = idx
-                    break
-            
-            # 即使没找到物料（可能被删），只要ID在也应该记录？或者报错？
-            # 这里假设ID必须存在
-            if mat_idx >= 0:
-                # 单位转换
-                stock_unit = materials[mat_idx].get("unit", "kg")
-                final_qty, success = convert_quantity(qty, line_uom, stock_unit)
+            if item_type == "product":
+                # 处理产品库存扣减
+                current_stock = 0.0
+                prod_idx = -1
                 
-                if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
-                     logger.warning(f"Unit conversion failed in post_issue: {qty} {line_uom} -> {stock_unit}")
+                for idx, p in enumerate(products):
+                    if p.get("id") == mid:
+                        current_stock = float(p.get("stock_quantity", 0.0))
+                        prod_idx = idx
+                        break
+                
+                if prod_idx >= 0:
+                    stock_unit = products[prod_idx].get("unit", "吨")
+                    final_qty, success = convert_quantity(qty, line_uom, stock_unit)
+                    
+                    if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
+                         logger.warning(f"Unit conversion failed in post_issue (product): {qty} {line_uom} -> {stock_unit}")
 
-                new_stock = current_stock
-                if not is_water:
                     new_stock = current_stock - final_qty
-                    materials[mat_idx]["stock_quantity"] = new_stock
-                    materials[mat_idx]["last_stock_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    products[prod_idx]["stock_quantity"] = new_stock
+                    products[prod_idx]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # 写入产品库存台账
+                    reason_note = f"生产领料: {target_issue.get('issue_code')}"
+                    if normalize_unit(line_uom) != normalize_unit(stock_unit):
+                        reason_note += f" (原: {qty}{line_uom})"
+                    
+                    new_rec_id = max([r.get("id", 0) for r in product_records], default=0) + 1
+                    product_records.append({
+                        "id": new_rec_id,
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "product_name": products[prod_idx]["name"],
+                        "product_type": products[prod_idx].get("type", "其他"),
+                        "type": "out",
+                        "quantity": final_qty,
+                        "reason": reason_note,
+                        "operator": operator,
+                        "snapshot_stock": new_stock
+                    })
+            else:
+                # 处理原材料库存扣减 (原有逻辑)
+                current_stock = 0.0
+                mat_idx = -1
+                is_water = False
                 
-                # 写入台账 (记录转换后的数量，并备注原始数量)
-                reason_note = f"生产领料: {target_issue.get('issue_code')}"
-                if normalize_unit(line_uom) != normalize_unit(stock_unit):
-                    reason_note += f" (原: {qty}{line_uom})"
+                for idx, m in enumerate(materials):
+                    if m.get("id") == mid:
+                        current_stock = float(m.get("stock_quantity", 0.0))
+                        mat_name = m.get("name", "").strip()
+                        water_names = ["水", "自来水", "纯水", "去离子水", "工业用水", "生产用水"]
+                        is_water = mat_name in water_names
+                        mat_idx = idx
+                        break
                 
-                new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
-                records.append({
-                    "id": new_rec_id,
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "material_id": mid,
-                    "type": "consume_out",
-                    "quantity": final_qty,
-                    "reason": reason_note,
-                    "operator": operator,
-                    "related_doc_type": "ISSUE",
-                    "related_doc_id": issue_id,
-                    "snapshot_stock": new_stock
-                })
+                if mat_idx >= 0:
+                    # 单位转换
+                    stock_unit = materials[mat_idx].get("unit", "kg")
+                    final_qty, success = convert_quantity(qty, line_uom, stock_unit)
+                    
+                    if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
+                         logger.warning(f"Unit conversion failed in post_issue: {qty} {line_uom} -> {stock_unit}")
+    
+                    new_stock = current_stock
+                    if not is_water:
+                        new_stock = current_stock - final_qty
+                        materials[mat_idx]["stock_quantity"] = new_stock
+                        materials[mat_idx]["last_stock_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # 写入台账 (记录转换后的数量，并备注原始数量)
+                    reason_note = f"生产领料: {target_issue.get('issue_code')}"
+                    if normalize_unit(line_uom) != normalize_unit(stock_unit):
+                        reason_note += f" (原: {qty}{line_uom})"
+                    
+                    new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+                    records.append({
+                        "id": new_rec_id,
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "material_id": mid,
+                        "type": "consume_out",
+                        "quantity": final_qty,
+                        "reason": reason_note,
+                        "operator": operator,
+                        "related_doc_type": "ISSUE",
+                        "related_doc_id": issue_id,
+                        "snapshot_stock": new_stock
+                    })
         
         # 更新领料单状态
         target_issue["status"] = "posted"
         target_issue["posted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         data["inventory_records"] = records
+        data["product_inventory_records"] = product_records
         data["raw_materials"] = materials
+        data["product_inventory"] = products
         # material_issues 已经在 target_issue 引用中修改了
         
         if self.save_data(data):
