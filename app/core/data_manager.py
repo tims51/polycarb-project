@@ -11,6 +11,7 @@ import streamlit as st
 
 from core.timeline_manager import TimelineManager
 from utils.logger import logger
+from utils.unit_helper import convert_quantity, normalize_unit
 
 class DataManager:
     """统一数据管理器"""
@@ -1202,6 +1203,7 @@ class DataManager:
             if qty <= 0: continue
             
             mid = line.get("item_id")
+            line_uom = line.get("uom", "kg")
             
             # 更新原材料库存
             current_stock = 0.0
@@ -1220,13 +1222,24 @@ class DataManager:
             # 即使没找到物料（可能被删），只要ID在也应该记录？或者报错？
             # 这里假设ID必须存在
             if mat_idx >= 0:
+                # 单位转换
+                stock_unit = materials[mat_idx].get("unit", "kg")
+                final_qty, success = convert_quantity(qty, line_uom, stock_unit)
+                
+                if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
+                     logger.warning(f"Unit conversion failed in post_issue: {qty} {line_uom} -> {stock_unit}")
+
                 new_stock = current_stock
                 if not is_water:
-                    new_stock = current_stock - qty
+                    new_stock = current_stock - final_qty
                     materials[mat_idx]["stock_quantity"] = new_stock
                     materials[mat_idx]["last_stock_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                # 写入台账
+                # 写入台账 (记录转换后的数量，并备注原始数量)
+                reason_note = f"生产领料: {target_issue.get('issue_code')}"
+                if normalize_unit(line_uom) != normalize_unit(stock_unit):
+                    reason_note += f" (原: {qty}{line_uom})"
+                
                 new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
                 records.append({
                     "id": new_rec_id,
@@ -1234,8 +1247,8 @@ class DataManager:
                     "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "material_id": mid,
                     "type": "consume_out",
-                    "quantity": qty,
-                    "reason": f"生产领料: {target_issue.get('issue_code')}",
+                    "quantity": final_qty,
+                    "reason": reason_note,
                     "operator": operator,
                     "related_doc_type": "ISSUE",
                     "related_doc_id": issue_id,
@@ -1282,6 +1295,7 @@ class DataManager:
             if qty <= 0: continue
             
             mid = line.get("item_id")
+            line_uom = line.get("uom", "kg")
             
             # 更新原材料库存（加回）
             current_stock = 0.0
@@ -1298,13 +1312,24 @@ class DataManager:
                     break
             
             if mat_idx >= 0:
+                # 单位转换
+                stock_unit = materials[mat_idx].get("unit", "kg")
+                final_qty, success = convert_quantity(qty, line_uom, stock_unit)
+
+                if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
+                     logger.warning(f"Unit conversion failed in cancel_issue: {qty} {line_uom} -> {stock_unit}")
+
                 new_stock = current_stock
                 if not is_water:
-                    new_stock = current_stock + qty # 恢复库存
+                    new_stock = current_stock + final_qty # 恢复库存
                     materials[mat_idx]["stock_quantity"] = new_stock
                     materials[mat_idx]["last_stock_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 # 写入冲销台账
+                reason_note = f"撤销领料: {target_issue.get('issue_code')}"
+                if normalize_unit(line_uom) != normalize_unit(stock_unit):
+                    reason_note += f" (原: {qty}{line_uom})"
+
                 new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
                 records.append({
                     "id": new_rec_id,
@@ -1312,8 +1337,8 @@ class DataManager:
                     "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "material_id": mid,
                     "type": "return_in", # 视为退料入库/冲销
-                    "quantity": qty,
-                    "reason": f"撤销领料: {target_issue.get('issue_code')}",
+                    "quantity": final_qty,
+                    "reason": reason_note,
                     "operator": operator,
                     "related_doc_type": "ISSUE_CANCEL",
                     "related_doc_id": issue_id,

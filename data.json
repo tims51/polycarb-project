@@ -130,8 +130,8 @@
             "material_number": "HCDDT-01",
             "abbreviation": "EPEG-3000",
             "usage_category": "母液合成",
-            "stock_quantity": 40.15,
-            "last_stock_update": "2026-01-12 14:02:41",
+            "stock_quantity": 27.399999999999636,
+            "last_stock_update": "2026-01-13 16:03:12",
             "unit": "ton"
         },
         {
@@ -149,7 +149,7 @@
             "material_number": "CJS-1",
             "abbreviation": "S-1",
             "usage_category": "母液合成,复配和助剂,速凝剂",
-            "stock_quantity": 0.0,
+            "stock_quantity": 16093.890000000003,
             "last_stock_update": "2026-01-12 14:02:41",
             "unit": "ton"
         },
@@ -168,8 +168,8 @@
             "main_usage": "合成用聚合小单体",
             "created_date": "2026-01-10",
             "id": 3,
-            "stock_quantity": 1.721,
-            "last_stock_update": "2026-01-12 14:02:41",
+            "stock_quantity": 0.22100000000000364,
+            "last_stock_update": "2026-01-13 16:03:12",
             "unit": "ton"
         },
         {
@@ -224,8 +224,9 @@
             "main_usage": "合成用小单体",
             "created_date": "2026-01-10",
             "id": 6,
-            "stock_quantity": 0.55,
-            "unit": "ton"
+            "stock_quantity": 0.3400000000000034,
+            "unit": "ton",
+            "last_stock_update": "2026-01-13 16:03:12"
         },
         {
             "name": "双氧水",
@@ -242,8 +243,9 @@
             "main_usage": "合成用氧化剂",
             "created_date": "2026-01-10",
             "id": 7,
-            "stock_quantity": 1.0835,
-            "unit": "ton"
+            "stock_quantity": 0.984499999999997,
+            "unit": "ton",
+            "last_stock_update": "2026-01-13 16:03:12"
         },
         {
             "name": "巯基丙酸",
@@ -260,8 +262,9 @@
             "main_usage": "合成用链转移剂",
             "created_date": "2026-01-10",
             "id": 8,
-            "stock_quantity": 0.8063,
-            "unit": "ton"
+            "stock_quantity": 0.7552999999999983,
+            "unit": "ton",
+            "last_stock_update": "2026-01-13 16:03:12"
         },
         {
             "name": "维生素C",
@@ -278,8 +281,9 @@
             "main_usage": "合成用还原剂",
             "created_date": "2026-01-10",
             "id": 9,
-            "stock_quantity": 0.595,
-            "unit": "ton"
+            "stock_quantity": 0.5800000000000001,
+            "unit": "ton",
+            "last_stock_update": "2026-01-13 16:03:12"
         },
         {
             "name": "四碳聚醚大单体",
@@ -314,8 +318,9 @@
             "main_usage": "母液pH调节剂，速凝剂原材料",
             "created_date": "2026-01-10",
             "id": 11,
-            "stock_quantity": 9.9,
-            "unit": "ton"
+            "stock_quantity": 9.629999999999995,
+            "unit": "ton",
+            "last_stock_update": "2026-01-13 16:03:12"
         },
         {
             "name": "葡萄糖酸钠",
@@ -474,10 +479,11 @@
             "supplier": "南京棋成",
             "usage_category": "母液合成",
             "main_usage": "合成用小料",
-            "stock_quantity": 0.0006,
+            "stock_quantity": -0.1494000000000142,
             "unit": "ton",
             "created_date": "2026-01-12",
-            "id": 20
+            "id": 20,
+            "last_stock_update": "2026-01-13 16:03:12"
         },
         {
             "name": "丙烯酰胺",
@@ -892,6 +898,24 @@
             "unit": "ton",
             "created_date": "2026-01-12",
             "id": 43
+        },
+        {
+            "name": "羟乙酯（代工）",
+            "material_number": "HCXDT-08",
+            "abbreviation": "DG-HEA",
+            "chemical_formula": "无",
+            "molecular_weight": 0.0,
+            "solid_content": 50.0,
+            "unit_price": 0.0,
+            "odor": "轻微",
+            "storage_condition": "干燥阴凉",
+            "supplier": "代工",
+            "usage_category": "母液合成",
+            "main_usage": "",
+            "stock_quantity": 0.0,
+            "unit": "ton",
+            "created_date": "2026-01-13",
+            "id": 44
         }
     ],
     "synthesis_records": [
@@ -1367,6 +1391,396 @@
             "related_doc_type": "ISSUE_CANCEL",
             "related_doc_id": 3,
             "snapshot_stock": 0.0
+        },
+        {
+            "id": 9,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 6,
+            "type": "consume_out",
+            "quantity": 0.21,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -209.45
+        },
+        {
+            "id": 10,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 7,
+            "type": "consume_out",
+            "quantity": 0.099,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -97.9165
+        },
+        {
+            "id": 11,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 9,
+            "type": "consume_out",
+            "quantity": 0.015,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -14.405
+        },
+        {
+            "id": 12,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 8,
+            "type": "consume_out",
+            "quantity": 0.051000000000000004,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -50.1937
+        },
+        {
+            "id": 13,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 20,
+            "type": "consume_out",
+            "quantity": 0.15,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -149.9994
+        },
+        {
+            "id": 14,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 2,
+            "type": "consume_out",
+            "quantity": 13.8,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.0
+        },
+        {
+            "id": 15,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 3,
+            "type": "consume_out",
+            "quantity": 1.5,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -1498.279
+        },
+        {
+            "id": 16,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 11,
+            "type": "consume_out",
+            "quantity": 0.27,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -260.1
+        },
+        {
+            "id": 17,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 2,
+            "type": "consume_out",
+            "quantity": 1.155,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.0
+        },
+        {
+            "id": 18,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:47:43",
+            "material_id": 1,
+            "type": "consume_out",
+            "quantity": 12.75,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -12709.85
+        },
+        {
+            "id": 19,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 6,
+            "type": "return_in",
+            "quantity": 0.21,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.5500000000000114
+        },
+        {
+            "id": 20,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 7,
+            "type": "return_in",
+            "quantity": 0.099,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 1.0835000000000008
+        },
+        {
+            "id": 21,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 9,
+            "type": "return_in",
+            "quantity": 0.015,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.5950000000000006
+        },
+        {
+            "id": 22,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 8,
+            "type": "return_in",
+            "quantity": 0.051000000000000004,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.8063000000000002
+        },
+        {
+            "id": 23,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 20,
+            "type": "return_in",
+            "quantity": 0.15,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.0005999999999914962
+        },
+        {
+            "id": 24,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 2,
+            "type": "return_in",
+            "quantity": 13.8,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.0
+        },
+        {
+            "id": 25,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 3,
+            "type": "return_in",
+            "quantity": 1.5,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 1.7210000000000036
+        },
+        {
+            "id": 26,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 11,
+            "type": "return_in",
+            "quantity": 0.27,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 9.899999999999977
+        },
+        {
+            "id": 27,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 2,
+            "type": "return_in",
+            "quantity": 1155.0,
+            "reason": "撤销领料: ISS-20260113-0001",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.0
+        },
+        {
+            "id": 28,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 15:58:05",
+            "material_id": 1,
+            "type": "return_in",
+            "quantity": 12.75,
+            "reason": "撤销领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE_CANCEL",
+            "related_doc_id": 1,
+            "snapshot_stock": 40.149999999999636
+        },
+        {
+            "id": 29,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 6,
+            "type": "consume_out",
+            "quantity": 0.21,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -209.45
+        },
+        {
+            "id": 30,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 7,
+            "type": "consume_out",
+            "quantity": 0.099,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -97.9165
+        },
+        {
+            "id": 31,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 9,
+            "type": "consume_out",
+            "quantity": 0.015,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -14.405
+        },
+        {
+            "id": 32,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 8,
+            "type": "consume_out",
+            "quantity": 0.051000000000000004,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -50.1937
+        },
+        {
+            "id": 33,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 20,
+            "type": "consume_out",
+            "quantity": 0.15,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -149.9994
+        },
+        {
+            "id": 34,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 2,
+            "type": "consume_out",
+            "quantity": 13.8,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.0
+        },
+        {
+            "id": 35,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 3,
+            "type": "consume_out",
+            "quantity": 1.5,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -1498.279
+        },
+        {
+            "id": 36,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 11,
+            "type": "consume_out",
+            "quantity": 0.27,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -260.1
+        },
+        {
+            "id": 37,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 2,
+            "type": "consume_out",
+            "quantity": 1.155,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": 0.0
+        },
+        {
+            "id": 38,
+            "date": "2026-01-13",
+            "created_at": "2026-01-13 16:03:12",
+            "material_id": 1,
+            "type": "consume_out",
+            "quantity": 12.75,
+            "reason": "生产领料: ISS-20260113-0001 [系统自动修复: 单位转换 kg->ton]",
+            "operator": "User",
+            "related_doc_type": "ISSUE",
+            "related_doc_id": 1,
+            "snapshot_stock": -12709.85
         }
     ],
     "boms": [
@@ -1402,17 +1816,6 @@
             "id": 3,
             "created_at": "2026-01-12 23:03:15",
             "last_modified": "2026-01-12 23:03:15"
-        },
-        {
-            "bom_code": "SD-KN01",
-            "bom_name": "KN01",
-            "bom_type": "母液",
-            "status": "active",
-            "production_mode": "自产",
-            "oem_manufacturer": "",
-            "id": 4,
-            "created_at": "2026-01-12 23:04:13",
-            "last_modified": "2026-01-12 23:04:13"
         },
         {
             "bom_code": "SD-502",
@@ -1490,6 +1893,17 @@
             "id": 11,
             "created_at": "2026-01-12 23:12:48",
             "last_modified": "2026-01-12 23:12:48"
+        },
+        {
+            "bom_code": "SD-KN01",
+            "bom_name": "KN01",
+            "bom_type": "母液",
+            "status": "active",
+            "production_mode": "自产",
+            "oem_manufacturer": "",
+            "id": 12,
+            "created_at": "2026-01-13 12:42:19",
+            "last_modified": "2026-01-13 12:42:19"
         }
     ],
     "bom_versions": [
@@ -1537,24 +1951,6 @@
                 },
                 {
                     "item_type": "raw_material",
-                    "item_id": 1,
-                    "item_name": "六碳聚醚大单体",
-                    "qty": 425.0,
-                    "uom": "kg",
-                    "phase": "",
-                    "remark": ""
-                },
-                {
-                    "item_type": "raw_material",
-                    "item_id": 3,
-                    "item_name": "丙烯酸",
-                    "qty": 45.0,
-                    "uom": "kg",
-                    "phase": "",
-                    "remark": ""
-                },
-                {
-                    "item_type": "raw_material",
                     "item_id": 20,
                     "item_name": "MA350",
                     "qty": 5.0,
@@ -1570,28 +1966,168 @@
                     "uom": "kg",
                     "phase": "",
                     "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 3,
+                    "item_name": "丙烯酸",
+                    "qty": 50.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 11,
+                    "item_name": "片碱",
+                    "qty": 9.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 38.5,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 1,
+                    "item_name": "六碳聚醚大单体",
+                    "qty": 425.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
                 }
             ],
             "id": 1,
-            "created_at": "2026-01-12 13:12:57"
+            "created_at": "2026-01-12 13:12:57",
+            "locked": true
         },
         {
             "bom_id": 9,
             "version": "V1",
             "effective_from": "2026-01-12",
-            "yield_base": 1000.0,
-            "lines": [],
+            "yield_base": 1020.0,
+            "lines": [
+                {
+                    "item_type": "raw_material",
+                    "item_id": 11,
+                    "item_name": "片碱",
+                    "qty": 270.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 16,
+                    "item_name": "氢氧化铝",
+                    "qty": 240.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 510.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                }
+            ],
             "id": 2,
-            "created_at": "2026-01-12 23:11:01"
+            "created_at": "2026-01-12 23:11:01",
+            "locked": true
         },
         {
             "bom_id": 2,
             "version": "V1",
             "effective_from": "2026-01-13",
-            "yield_base": 1000.0,
-            "lines": [],
+            "yield_base": 1000.08,
+            "lines": [
+                {
+                    "item_type": "raw_material",
+                    "item_id": 18,
+                    "item_name": "6碳聚醚大单体",
+                    "qty": 320.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 200.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 7,
+                    "item_name": "双氧水",
+                    "qty": 4.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 46.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 8,
+                    "item_name": "巯基丙酸",
+                    "qty": 1.86,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 9,
+                    "item_name": "维生素C",
+                    "qty": 0.62,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 335.6,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 44,
+                    "item_name": "羟乙酯（代工）",
+                    "qty": 92.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                }
+            ],
             "id": 3,
-            "created_at": "2026-01-13 10:01:10"
+            "created_at": "2026-01-13 10:01:10",
+            "locked": true
         },
         {
             "bom_id": 7,
@@ -1691,8 +2227,8 @@
                 },
                 {
                     "item_type": "raw_material",
-                    "item_id": 1,
-                    "item_name": "六碳聚醚大单体",
+                    "item_id": 2,
+                    "item_name": "水",
                     "qty": 180.4,
                     "uom": "kg",
                     "phase": "",
@@ -1700,10 +2236,327 @@
                 }
             ],
             "id": 4,
-            "created_at": "2026-01-13 10:01:36"
+            "created_at": "2026-01-13 10:01:36",
+            "locked": true
+        },
+        {
+            "bom_id": 3,
+            "version": "V1",
+            "effective_from": "2026-01-13",
+            "yield_base": 1008.4,
+            "lines": [
+                {
+                    "item_type": "raw_material",
+                    "item_id": 10,
+                    "item_name": "四碳聚醚大单体",
+                    "qty": 430.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 355.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 7,
+                    "item_name": "双氧水",
+                    "qty": 2.5,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 3,
+                    "item_name": "丙烯酸",
+                    "qty": 20.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 3,
+                    "item_name": "丙烯酸",
+                    "qty": 38.6,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 4.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 8,
+                    "item_name": "巯基丙酸",
+                    "qty": 2.7,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 9,
+                    "item_name": "维生素C",
+                    "qty": 0.6,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 30.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 11,
+                    "item_name": "片碱",
+                    "qty": 10.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 115.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                }
+            ],
+            "id": 5,
+            "created_at": "2026-01-13 10:46:09",
+            "locked": true
+        },
+        {
+            "bom_id": 8,
+            "version": "V1",
+            "effective_from": "2026-01-13",
+            "yield_base": 1000.062,
+            "lines": [
+                {
+                    "item_type": "raw_material",
+                    "item_id": 18,
+                    "item_name": "6碳聚醚大单体",
+                    "qty": 350.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 340.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 7,
+                    "item_name": "双氧水",
+                    "qty": 3.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 48.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 8,
+                    "item_name": "巯基丙酸",
+                    "qty": 2.75,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 9,
+                    "item_name": "维生素C",
+                    "qty": 0.612,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 10.8,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 3,
+                    "item_name": "丙烯酸",
+                    "qty": 43.2,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                },
+                {
+                    "item_type": "raw_material",
+                    "item_id": 2,
+                    "item_name": "水",
+                    "qty": 201.7,
+                    "uom": "kg",
+                    "phase": "",
+                    "remark": ""
+                }
+            ],
+            "id": 6,
+            "created_at": "2026-01-13 12:58:06",
+            "locked": true
+        },
+        {
+            "bom_id": 10,
+            "version": "V1",
+            "effective_from": "2026-01-13",
+            "yield_base": 1000.0,
+            "lines": [],
+            "id": 7,
+            "created_at": "2026-01-13 13:03:01"
         }
     ],
-    "production_orders": [],
-    "material_issues": [],
+    "production_orders": [
+        {
+            "order_code": "PROD-20260113-50f0",
+            "bom_id": 1,
+            "bom_version_id": 1,
+            "plan_qty": 30000.0,
+            "status": "finished",
+            "production_mode": "自产",
+            "oem_manufacturer": "",
+            "id": 1,
+            "created_at": "2026-01-13 15:47:33",
+            "last_modified": "2026-01-13 15:47:50"
+        }
+    ],
+    "material_issues": [
+        {
+            "id": 1,
+            "issue_code": "ISS-20260113-0001",
+            "production_order_id": 1,
+            "status": "posted",
+            "created_at": "2026-01-13 15:47:37",
+            "lines": [
+                {
+                    "item_id": 6,
+                    "item_type": "raw_material",
+                    "required_qty": 210.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "615功单"
+                },
+                {
+                    "item_id": 7,
+                    "item_type": "raw_material",
+                    "required_qty": 99.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "双氧水"
+                },
+                {
+                    "item_id": 9,
+                    "item_type": "raw_material",
+                    "required_qty": 15.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "维生素C"
+                },
+                {
+                    "item_id": 8,
+                    "item_type": "raw_material",
+                    "required_qty": 51.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "巯基丙酸"
+                },
+                {
+                    "item_id": 20,
+                    "item_type": "raw_material",
+                    "required_qty": 150.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "MA350"
+                },
+                {
+                    "item_id": 2,
+                    "item_type": "raw_material",
+                    "required_qty": 13800.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "水"
+                },
+                {
+                    "item_id": 3,
+                    "item_type": "raw_material",
+                    "required_qty": 1500.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "丙烯酸"
+                },
+                {
+                    "item_id": 11,
+                    "item_type": "raw_material",
+                    "required_qty": 270.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "片碱"
+                },
+                {
+                    "item_id": 2,
+                    "item_type": "raw_material",
+                    "required_qty": 1155.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "水"
+                },
+                {
+                    "item_id": 1,
+                    "item_type": "raw_material",
+                    "required_qty": 12750.0,
+                    "uom": "kg",
+                    "phase": "",
+                    "item_name": "六碳聚醚大单体"
+                }
+            ],
+            "posted_at": "2026-01-13 16:03:12",
+            "last_modified": "2026-01-13 15:58:05"
+        }
+    ],
     "goods_receipts": []
 }
