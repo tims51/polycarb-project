@@ -592,11 +592,31 @@ def _render_inventory_reports(data_manager):
         for mid, qty in balances.items():
             mat = mat_map.get(mid)
             if mat:
+                # 转换单位：系统默认存储单位通常为 kg（或原始单位），这里统一转换为吨显示
+                # 假设系统内部单位为 kg
+                stock_kg = float(qty)
+                stock_ton = stock_kg / 1000.0
+                
+                # 如果原单位本身就是吨，则不需要除以1000（这里需要根据实际单位判断）
+                # 简单起见，我们假设 unit 为 kg 时转吨；为 ton 时直接用；其他单位保留原样
+                unit = mat.get('unit', 'kg').lower()
+                
+                display_qty = stock_ton
+                display_unit = "吨"
+                
+                if unit in ['ton', 't', '吨']:
+                    display_qty = stock_kg # 原本就是吨
+                elif unit not in ['kg', 'kgs', '公斤', '千克']:
+                    # 非质量单位或非常规单位，保持原样
+                    display_qty = stock_kg
+                    display_unit = mat.get('unit', 'kg')
+                
                 report_data.append({
                     "物料名称": mat['name'],
                     "物料号": mat.get('material_number'),
-                    "当前库存": qty,
-                    "单位": mat.get('unit', 'kg')
+                    "当前库存 (吨)": f"{display_qty:.4f}", # 保留4位小数
+                    "原始库存": f"{stock_kg:.2f}",
+                    "原始单位": mat.get('unit', 'kg')
                 })
         
         if report_data:
