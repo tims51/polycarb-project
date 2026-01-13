@@ -36,7 +36,7 @@ def render_product_inventory_page(data_manager):
                 # 使用 radio 选择模式
                 product_mode = st.radio("选择产品", ["选择现有", "新增产品"], horizontal=True, key="inv_op_mode")
 
-        with st.form("product_op_form", clear_on_submit=True):
+        with st.form("product_op_form", clear_on_submit=False):
             c1, c2, c3 = st.columns([1.5, 1.5, 1])
             
             with c1:
@@ -91,6 +91,19 @@ def render_product_inventory_page(data_manager):
                     success, msg = data_manager.add_product_inventory_record(record_data)
                     if success:
                         st.success(f"操作成功: {op_name} {op_type} {op_qty}吨")
+                        # 成功后，通过设置 session state 或 rerun 来清空/重置表单
+                        # 但由于 key 绑定，直接 rerun 可能不会清空 text_input，除非我们手动清理 session state
+                        # 或者简单地不做任何事，让用户手动清空？不，用户习惯是提交成功后清空。
+                        # 使用 clear_on_submit=True 是最简单的，但失败时也会清空。
+                        # 既然我们要“失败时保留”，那就只能 clear_on_submit=False，然后成功时手动清空。
+                        
+                        # 手动清空 session state 中绑定的 key
+                        if "inv_op_name_txt" in st.session_state: st.session_state["inv_op_name_txt"] = ""
+                        # selectbox 无法轻易重置为 index 0，除非删除 key
+                        if "inv_op_name_sel" in st.session_state: del st.session_state["inv_op_name_sel"]
+                        if "inv_op_qty" in st.session_state: st.session_state["inv_op_qty"] = 0.0
+                        if "inv_op_reason" in st.session_state: st.session_state["inv_op_reason"] = ""
+                        
                         st.rerun()
                     else:
                         st.error(msg)
