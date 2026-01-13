@@ -210,30 +210,67 @@ def render_product_inventory_page(data_manager):
         )
         
         # 处理变更
+        # 注意：st.data_editor 的返回值 edited_df 已经包含了用户的修改
+        # 但是我们通常需要知道具体改了哪些行，以便更新后端
+        # Streamlit 在 session_state 中存储了 edited_rows
+        # 可是，如果在同一帧中处理并更新数据，可能会导致重新渲染时的状态冲突
+        # 更好的方式是比较 edited_df 和 df_edit
+        
+        # 但是这里使用了 key="prod_inv_editor"，我们可以检查 session_state
         if "prod_inv_editor" in st.session_state and st.session_state["prod_inv_editor"].get("edited_rows"):
             updates_map = st.session_state["prod_inv_editor"]["edited_rows"]
             any_success = False
             
+            # 使用列表收集需要处理的更新，避免在迭代中修改
+            updates_to_process = []
+            
             for idx, changes in updates_map.items():
-                if idx in df_edit.index:
-                    prod_id = int(df_edit.loc[idx, "id"])
+                # 注意：data_editor 的 index 是基于传入 DataFrame 的 index
+                # 如果 df_edit 是切片，index 应该保留了原始 index
+                # 但 st.data_editor 有时会重置 index 如果 hide_index=True? 
+                # 不，hide_index 只是不显示。
+                # 关键是 df_edit 的 index 类型。
+                
+                # 为了安全起见，我们应该通过行号来获取 ID，或者确保 index 是对的
+                # updates_map 的 key 是行索引（整数，从0开始，还是原始索引？）
+                # 文档说：edited_rows is a dict mapping the integer index of the row to a dict of edited values.
+                # 这个 integer index 是 display index (0, 1, 2...) 还是 dataframe index?
+                # 实际上是 data_editor 显示的行号 (0-based index of the displayed data).
+                
+                # 因此，我们需要根据这个 0-based index 找到 df_edit 对应的行
+                if idx < len(df_edit):
+                    # 获取该行的 ID
+                    # df_edit.iloc[idx] 获取第 idx 行
+                    row_id = int(df_edit.iloc[idx]["id"])
                     
                     # 检查实质性变更
                     real_changes = {}
+                    # 获取原始值
+                    original_row = df_edit.iloc[idx]
+                    
                     for col, new_val in changes.items():
-                        old_val = df_edit.loc[idx, col]
+                        old_val = original_row[col]
                         if old_val != new_val:
                             real_changes[col] = new_val
                             
                     if real_changes:
-                        if data_manager.update_product_inventory_item(prod_id, real_changes):
-                            any_success = True
+                        updates_to_process.append((row_id, real_changes))
             
-            if any_success:
-                st.toast("库存信息已更新")
-                # 可选：延迟 rerun 以刷新界面显示 (特别是 last_update)
-                # time.sleep(0.5)
-                # st.rerun()
+            if updates_to_process:
+                for prod_id, changes in updates_to_process:
+                    if data_manager.update_product_inventory_item(prod_id, changes):
+                        any_success = True
+                
+                if any_success:
+                    st.toast("库存信息已更新")
+                    # 重要：处理完后，需要清除 edited_rows 状态，否则会无限循环更新
+                    # 但 Streamlit 不允许直接修改组件状态
+                    # 通常的做法是使用回调函数，或者在更新后 rerun
+                    # 如果不 rerun，下一次交互会再次触发更新
+                    # 我们可以通过 sleep 稍作延迟让用户看到 toast，然后 rerun
+                    import time
+                    time.sleep(0.5)
+                    st.rerun()
         
     # 4. 历史记录
     with st.expander("📜 历史流水记录"):
