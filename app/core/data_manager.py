@@ -1577,19 +1577,51 @@ class DataManager:
         return False, "保存失败"
 
     def update_product_inventory_item(self, product_id, updates):
-        """更新产品信息（如安全库存等）"""
+        """更新产品信息（支持级联更新名称和类型）"""
         data = self.load_data()
         inventory = data.get("product_inventory", [])
-        updated = False
+        records = data.get("product_inventory_records", [])
+        
+        target_item = None
+        target_idx = -1
+        
         for i, item in enumerate(inventory):
             if item.get("id") == product_id:
-                inventory[i].update(updates)
-                inventory[i]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                updated = True
+                target_item = item
+                target_idx = i
                 break
-        if updated:
+        
+        if target_item:
+            # 检查是否需要级联更新
+            old_name = target_item.get("name")
+            old_type = target_item.get("type")
+            new_name = updates.get("name", old_name)
+            new_type = updates.get("type", old_type)
+            
+            need_cascade = (new_name != old_name) or (new_type != old_type)
+            
+            # 更新主数据
+            inventory[target_idx].update(updates)
+            inventory[target_idx]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            if need_cascade:
+                count = 0
+                for record in records:
+                    # 匹配名称和类型 (假设组合唯一)
+                    # 注意：如果只改了 type，name没变，也得更新 type。
+                    # 如果只改了 name，type没变，也得更新 name。
+                    # 这里的匹配条件是 old_name 和 old_type。
+                    if record.get("product_name") == old_name and record.get("product_type") == old_type:
+                        record["product_name"] = new_name
+                        record["product_type"] = new_type
+                        count += 1
+                if count > 0:
+                    logger.info(f"Cascaded update for product {product_id}: {count} records updated.")
+
             data["product_inventory"] = inventory
+            data["product_inventory_records"] = records # 确保记录也被保存
             return self.save_data(data)
+            
         return False
 
     def get_product_inventory_records(self):

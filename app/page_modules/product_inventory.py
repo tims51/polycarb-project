@@ -160,7 +160,7 @@ def render_product_inventory_page(data_manager):
                         st.error(msg)
 
     # 3. 库存报表
-    st.subheader("📊 库存明细表")
+    st.subheader("📊 库存明细表 (可编辑)")
     
     if not inventory:
         st.info("暂无库存数据")
@@ -168,28 +168,72 @@ def render_product_inventory_page(data_manager):
         # 转换为 DataFrame
         df = pd.DataFrame(inventory)
         
-        # 确保 min_stock / max_stock 列存在
-        if "min_stock" not in df.columns: df["min_stock"] = 0.0
-        if "max_stock" not in df.columns: df["max_stock"] = 0.0
-        
-        # 格式化显示
-        df_display = df[["name", "type", "stock_quantity", "min_stock", "max_stock", "unit", "last_update"]].copy()
-        df_display.columns = ["产品名称", "分类", "当前库存", "最低库存", "最高库存", "单位", "最后更新时间"]
+        # 确保列存在
+        for col in ["min_stock", "max_stock", "unit", "last_update"]:
+            if col not in df.columns:
+                df[col] = 0.0 if "stock" in col else ""
         
         # 筛选器
         filter_cat = st.multiselect("按分类筛选", categories, default=categories)
+        
+        # 准备编辑用的 DataFrame
+        # 必须保留原始 index 以便映射修改，或者我们使用 id 列
+        df_edit = df.copy()
         if filter_cat:
-            df_display = df_display[df_display["分类"].isin(filter_cat)]
+            df_edit = df_edit[df_edit["type"].isin(filter_cat)]
             
-        st.dataframe(
-            df_display,
+        # 只需要特定的列，并确保 id 存在以便更新
+        cols_to_use = ["id", "name", "type", "stock_quantity", "min_stock", "max_stock", "unit", "last_update"]
+        # 补全可能缺失的列
+        for c in cols_to_use:
+            if c not in df_edit.columns: df_edit[c] = None
+            
+        df_edit = df_edit[cols_to_use]
+        
+        # 使用 data_editor
+        edited_df = st.data_editor(
+            df_edit,
+            key="prod_inv_editor",
             use_container_width=True,
+            hide_index=True,
             column_config={
-                "当前库存": st.column_config.NumberColumn("当前库存", format="%.2f 吨"),
-                "最低库存": st.column_config.NumberColumn("最低库存", format="%.2f 吨"),
-                "最高库存": st.column_config.NumberColumn("最高库存", format="%.2f 吨"),
-            }
+                "id": None, # 隐藏 ID
+                "name": st.column_config.TextColumn("产品名称", required=True),
+                "type": st.column_config.SelectColumn("分类", options=categories, required=True),
+                "stock_quantity": st.column_config.NumberColumn("当前库存", disabled=True, format="%.2f 吨"),
+                "min_stock": st.column_config.NumberColumn("最低库存", min_value=0.0, step=0.1, format="%.2f"),
+                "max_stock": st.column_config.NumberColumn("最高库存", min_value=0.0, step=0.1, format="%.2f"),
+                "unit": st.column_config.TextColumn("单位"),
+                "last_update": st.column_config.DatetimeColumn("最后更新时间", disabled=True, format="YYYY-MM-DD HH:mm"),
+            },
+            disabled=["stock_quantity", "last_update"]
         )
+        
+        # 处理变更
+        if "prod_inv_editor" in st.session_state and st.session_state["prod_inv_editor"].get("edited_rows"):
+            updates_map = st.session_state["prod_inv_editor"]["edited_rows"]
+            any_success = False
+            
+            for idx, changes in updates_map.items():
+                if idx in df_edit.index:
+                    prod_id = int(df_edit.loc[idx, "id"])
+                    
+                    # 检查实质性变更
+                    real_changes = {}
+                    for col, new_val in changes.items():
+                        old_val = df_edit.loc[idx, col]
+                        if old_val != new_val:
+                            real_changes[col] = new_val
+                            
+                    if real_changes:
+                        if data_manager.update_product_inventory_item(prod_id, real_changes):
+                            any_success = True
+            
+            if any_success:
+                st.toast("库存信息已更新")
+                # 可选：延迟 rerun 以刷新界面显示 (特别是 last_update)
+                # time.sleep(0.5)
+                # st.rerun()
         
     # 4. 历史记录
     with st.expander("📜 历史流水记录"):
