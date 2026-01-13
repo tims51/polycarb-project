@@ -224,6 +224,10 @@ def _render_bom_detail(data_manager, bom):
 
 def _render_version_editor(data_manager, version, mat_options):
     current_lines = version.get("lines", [])
+    locked = bool(version.get("locked", False))
+    auth_key = f"ver_edit_auth_{version['id']}"
+    if auth_key not in st.session_state:
+        st.session_state[auth_key] = False
 
     col1, col2 = st.columns(2)
     with col1:
@@ -242,23 +246,14 @@ def _render_version_editor(data_manager, version, mat_options):
     c_m2.metric("设定基准产量", f"{yield_base:.3f} kg")
     c_m3.metric("差异", f"{diff:.3f} kg", delta_color="normal" if abs(diff) < 1e-6 else "inverse")
 
-    # 更新头信息按钮
     if st.button("更新版本头信息", key=f"save_head_{version['id']}"):
-        # 1) 计算当前明细总量
-        total_qty = sum(float(line.get('qty', 0)) for line in current_lines)
-        # 2) 校验
-        if abs(total_qty - yield_base) > 1e-6:   # 允许 0.000001 误差
-            st.error(f"物料总量 {total_qty:.3f} kg 与基准产量 {yield_base} kg 不一致，请先调整明细或输入管理员密码强制保存")
-            # 3) 密码输入框
-            with st.form(key=f"pwd_force_head_{version['id']}"):
-                pwd = st.text_input("管理员密码", type="password", placeholder="默认 admin")
-                submitted = st.form_submit_button("强制保存")
+        if locked and not st.session_state[auth_key]:
+            with st.form(key=f"pwd_head_{version['id']}"):
+                pwd = st.text_input("管理员密码", type="password")
+                submitted = st.form_submit_button("开始修改")
                 if submitted and pwd == "admin":
-                    data_manager.update_bom_version(version['id'], {
-                        "effective_from": eff_from.strftime("%Y-%m-%d"),
-                        "yield_base": yield_base
-                    })
-                    st.success("已强制保存")
+                    st.session_state[auth_key] = True
+                    st.success("已验证")
                     st.rerun()
                 elif submitted:
                     st.error("密码错误")
@@ -294,39 +289,81 @@ def _render_version_editor(data_manager, version, mat_options):
             with c4:
                 st.write(f"{line.get('remark', '')}")
             with c5:
-                if st.button("🗑️", key=f"del_line_{version['id']}_{idx}"):
-                    del current_lines[idx]
-                    data_manager.update_bom_version(version['id'], {"lines": current_lines})
-                    st.rerun()
+                if not locked or st.session_state[auth_key]:
+                    if st.button("🗑️", key=f"del_line_{version['id']}_{idx}"):
+                        del current_lines[idx]
+                        data_manager.update_bom_version(version['id'], {"lines": current_lines})
+                        st.rerun()
     
     st.divider()
     st.markdown("➕ 添加明细行")
-    with st.form(f"add_line_form_{version['id']}", clear_on_submit=True):
-        lc1, lc2, lc3 = st.columns([3, 1, 1])
-        with lc1:
-            sel_mat_label = st.selectbox("选择原材料", list(mat_options.keys()))
-        with lc2:
-            l_qty = st.number_input("数量", min_value=0.0, step=0.1)
-        with lc3:
-            l_phase = st.text_input("阶段 (e.g. A料)", value="")
-            
-        submitted = st.form_submit_button("添加")
-        if submitted:
-            mat_id = mat_options[sel_mat_label]
-            mat_name = sel_mat_label.split(' (')[0]
-            
-            new_line = {
-                "item_type": "raw_material",
-                "item_id": mat_id,
-                "item_name": mat_name,
-                "qty": l_qty,
-                "uom": "kg",
-                "phase": l_phase,
-                "remark": ""
-            }
-            current_lines.append(new_line)
-            data_manager.update_bom_version(version['id'], {"lines": current_lines})
-            st.rerun()
+    if locked and not st.session_state[auth_key]:
+        st.info("版本已保存，修改需要管理员密码")
+        with st.form(key=f"pwd_edit_{version['id']}"):
+            pwd = st.text_input("管理员密码", type="password")
+            submitted = st.form_submit_button("开始修改")
+            if submitted and pwd == "admin":
+                st.session_state[auth_key] = True
+                st.success("已验证")
+                st.rerun()
+            elif submitted:
+                st.error("密码错误")
+    else:
+        with st.form(f"add_line_form_{version['id']}", clear_on_submit=True):
+            lc1, lc2, lc3 = st.columns([3, 1, 1])
+            with lc1:
+                sel_mat_label = st.selectbox("选择原材料", list(mat_options.keys()))
+            with lc2:
+                l_qty = st.number_input("数量", min_value=0.0, step=0.1)
+            with lc3:
+                l_phase = st.text_input("阶段 (e.g. A料)", value="")
+            submitted = st.form_submit_button("添加")
+            if submitted:
+                mat_id = mat_options[sel_mat_label]
+                mat_name = sel_mat_label.split(' (')[0]
+                new_line = {
+                    "item_type": "raw_material",
+                    "item_id": mat_id,
+                    "item_name": mat_name,
+                    "qty": l_qty,
+                    "uom": "kg",
+                    "phase": l_phase,
+                    "remark": ""
+                }
+                current_lines.append(new_line)
+                data_manager.update_bom_version(version['id'], {"lines": current_lines})
+                st.rerun()
+    st.divider()
+    if not locked:
+        if st.button("保存版本", key=f"save_version_{version['id']}"):
+            total_qty = sum(float(line.get('qty', 0)) for line in current_lines)
+            if abs(total_qty - yield_base) > 1e-6:
+                st.error(f"物料总量 {total_qty:.3f} kg 与基准产量 {yield_base} kg 不一致")
+                with st.form(key=f"pwd_force_save_{version['id']}"):
+                    pwd = st.text_input("管理员密码", type="password")
+                    submitted = st.form_submit_button("强制保存")
+                    if submitted and pwd == "admin":
+                        data_manager.update_bom_version(version['id'], {
+                            "effective_from": eff_from.strftime("%Y-%m-%d"),
+                            "yield_base": yield_base,
+                            "lines": current_lines,
+                            "locked": True
+                        })
+                        st.success("已保存并锁定")
+                        st.rerun()
+                    elif submitted:
+                        st.error("密码错误")
+            else:
+                data_manager.update_bom_version(version['id'], {
+                    "effective_from": eff_from.strftime("%Y-%m-%d"),
+                    "yield_base": yield_base,
+                    "lines": current_lines,
+                    "locked": True
+                })
+                st.success("已保存并锁定")
+                st.rerun()
+    else:
+        st.success("版本已保存")
 
 def _render_production_management(data_manager):
     st.subheader("生产订单管理")
