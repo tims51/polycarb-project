@@ -189,6 +189,10 @@ def _render_bom_detail(data_manager, bom):
          st.session_state.bom_edit_mode = True
          st.rerun()
 
+    # 结构树可视化
+    with st.expander("🌳 查看多级 BOM 结构树"):
+        _render_bom_tree_recursive(data_manager, bom['id'])
+
     # 版本管理
     st.divider()
     st.markdown("#### 版本管理")
@@ -329,6 +333,10 @@ def _render_version_editor(data_manager, version, mat_options):
                     l_qty = st.number_input("数量", min_value=0.0, step=0.1)
                 with lc3:
                     l_phase = st.text_input("阶段 (e.g. A料)", value="")
+                
+                # 新增替代料说明输入
+                l_subs = st.text_input("替代料说明 (可选)", placeholder="例如: 可用类似规格替代")
+                
                 submitted = st.form_submit_button("添加")
                 if submitted:
                     type_id_str = combined_options[sel_item_label]
@@ -349,7 +357,8 @@ def _render_version_editor(data_manager, version, mat_options):
                         "qty": l_qty,
                         "uom": "kg",
                         "phase": l_phase,
-                        "remark": ""
+                        "remark": "",
+                        "substitutes": l_subs # 保存替代料
                     }
                     current_lines.append(new_line)
                     data_manager.update_bom_version(version['id'], {"lines": current_lines})
@@ -656,3 +665,52 @@ def _render_inventory_reports(data_manager):
             st.dataframe(df.sort_values("created_at", ascending=False), use_container_width=True)
         else:
             st.info("暂无台账记录")
+
+def _render_bom_tree_recursive(data_manager, bom_id, level=0, visited=None):
+    """递归渲染 BOM 结构�?""
+    if visited is None: visited = set()
+    
+    # 防止无限递归
+    if bom_id in visited:
+        st.markdown(f"{'&nbsp;' * 4 * level} 🔄 (循环引用: ID {bom_id})", unsafe_allow_html=True)
+        return
+    visited.add(bom_id)
+    
+    # 获取 BOM 信息
+    boms = data_manager.get_all_boms()
+    bom = next((b for b in boms if b['id'] == bom_id), None)
+    if not bom: return
+    
+    # 获取最新版�?    versions = data_manager.get_bom_versions(bom_id)
+    if not versions:
+        st.markdown(f"{'&nbsp;' * 4 * level} 📦 **{bom['bom_name']}** (无版�?", unsafe_allow_html=True)
+        return
+        
+    latest_ver = versions[-1]
+    
+    # 渲染节点
+    indent = "&nbsp;" * 4 * level
+    icon = "🏭" if level == 0 else "🔧"
+    st.markdown(f"{indent} {icon} **{bom['bom_name']}** ({bom['bom_code']}) <span style='color:grey; font-size:0.8em'>V{latest_ver['version']}</span>", unsafe_allow_html=True)
+    
+    # 渲染子节�?    for line in latest_ver.get("lines", []):
+        item_name = line.get('item_name', 'Unknown')
+        qty = line.get('qty', 0)
+        uom = line.get('uom', 'kg')
+        item_type = line.get('item_type', 'raw_material')
+        subs = line.get('substitutes', '')
+        
+        child_indent = "&nbsp;" * 4 * (level + 1)
+        
+        note = ""
+        if subs: note = f" <span style='color:orange; font-size:0.8em'>(�? {subs})</span>"
+        
+        if item_type == "product":
+            # 递归调用
+            # 先打印行本身
+            st.markdown(f"{child_indent} 📦 {item_name}: {qty} {uom}{note}", unsafe_allow_html=True)
+            # 递归
+            _render_bom_tree_recursive(data_manager, line.get('item_id'), level + 1, visited.copy())
+        else:
+            # 叶子节点 (原材�?
+            st.markdown(f"{child_indent} 🧪 {item_name}: {qty} {uom}{note}", unsafe_allow_html=True)

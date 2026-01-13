@@ -196,6 +196,9 @@ def render_raw_material_management(data_manager):
                                        key=f"raw_odor_{form_id}")
                     storage_condition = st.text_input("存储条件", key=f"raw_storage_condition_{form_id}")
                     supplier = st.text_input("供应商", key=f"raw_supplier_{form_id}")
+                    # 新增评估字段
+                    supplier_rating = st.slider("供应商评分 (1-5)", 1, 5, 3, key=f"raw_supplier_rating_{form_id}")
+                    qc_status = st.selectbox("QC 状态", ["合格", "待检", "不合格", "冻结"], key=f"raw_qc_status_{form_id}")
                 
                 usage_category_options = ["母液合成", "复配和助剂", "速凝剂"]
                 usage_categories = st.multiselect("用途*", usage_category_options, key=f"raw_usage_category_{form_id}")
@@ -247,6 +250,8 @@ def render_raw_material_management(data_manager):
                                     "odor": odor,
                                     "storage_condition": storage_condition,
                                     "supplier": supplier,
+                                    "supplier_rating": supplier_rating,
+                                    "qc_status": qc_status,
                                     "usage_category": ",".join(usage_categories),
                                     "main_usage": main_usage,
                                     "stock_quantity": initial_stock,
@@ -318,6 +323,13 @@ def render_raw_material_management(data_manager):
                     
                     if op_qty > 0:
                         # 单位转换
+                        # 核心逻辑：
+                        # 1. 界面输入 op_qty 和 op_unit
+                        # 2. 获取原材料库存主单位 stock_unit
+                        # 3. 将 op_qty 转换为 stock_unit 单位下的 final_qty
+                        # 4. data_manager.add_inventory_record 接收 final_qty，
+                        #    它会直接将此值加减到原材料的 stock_quantity 上（假设该字段单位即为 stock_unit）。
+                        
                         final_qty, success = convert_quantity(op_qty, op_unit, stock_unit)
                         
                         conversion_note = ""
@@ -332,7 +344,7 @@ def render_raw_material_management(data_manager):
                         record_data = {
                             "material_id": selected_mat_id,
                             "type": "in" if op_type == "入库" else "out",
-                            "quantity": final_qty,
+                            "quantity": final_qty, # 这里传递的是转换后的数量 (主单位)
                             "reason": f"{op_reason} [原始: {op_qty}{op_unit}]{conversion_note}",
                             "operator": "User", 
                             "date": datetime.now().strftime("%Y-%m-%d")
@@ -416,6 +428,7 @@ def render_raw_material_management(data_manager):
                 "unit": "单位",
                 "abbreviation": "缩写",
                 "supplier": "供应商",
+                "qc_status": "QC状态",
                 "usage_category": "用途",
                 "chemical_formula": "化学式",
                 "molecular_weight": "分子量",
@@ -583,6 +596,10 @@ def render_raw_material_management(data_manager):
                             )
                             e_storage = st.text_input("存储条件", value=str(editing_mat.get("storage_condition", "")), key=f"raw_e_storage_{form_uid}")
                             e_supplier = st.text_input("供应商", value=str(editing_mat.get("supplier", "")), key=f"raw_e_supplier_{form_uid}")
+                            e_rating = st.slider("供应商评分", 1, 5, int(editing_mat.get("supplier_rating", 3)), key=f"raw_e_rating_{form_uid}")
+                            curr_qc = editing_mat.get("qc_status", "合格")
+                            qc_opts = ["合格", "待检", "不合格", "冻结"]
+                            e_qc = st.selectbox("QC 状态", qc_opts, index=qc_opts.index(curr_qc) if curr_qc in qc_opts else 0, key=f"raw_e_qc_{form_uid}")
                         
                         e_inv_col1, e_inv_col2 = st.columns(2)
                         
@@ -661,6 +678,8 @@ def render_raw_material_management(data_manager):
                                             "odor": e_odor,
                                             "storage_condition": e_storage.strip(),
                                             "supplier": e_supplier.strip(),
+                                            "supplier_rating": e_rating,
+                                            "qc_status": e_qc,
                                             "stock_quantity": float(e_stock),
                                             "unit": e_unit.strip(),
                                             "usage_category": ",".join(e_usage_categories),

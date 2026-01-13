@@ -1576,6 +1576,22 @@ class DataManager:
             return True, "库存更新成功"
         return False, "保存失败"
 
+    def update_product_inventory_item(self, product_id, updates):
+        """更新产品信息（如安全库存等）"""
+        data = self.load_data()
+        inventory = data.get("product_inventory", [])
+        updated = False
+        for i, item in enumerate(inventory):
+            if item.get("id") == product_id:
+                inventory[i].update(updates)
+                inventory[i]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                updated = True
+                break
+        if updated:
+            data["product_inventory"] = inventory
+            return self.save_data(data)
+        return False
+
     def get_product_inventory_records(self):
         """获取产品库存流水"""
         data = self.load_data()
