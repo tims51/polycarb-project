@@ -1628,6 +1628,18 @@ class DataManager:
         """获取产品库存流水"""
         data = self.load_data()
         return data.get("product_inventory_records", [])
+
+    def delete_product_inventory_item(self, product_id):
+        """删除产品库存条目"""
+        data = self.load_data()
+        inventory = data.get("product_inventory", [])
+        
+        new_inventory = [item for item in inventory if item.get("id") != product_id]
+        
+        if len(new_inventory) < len(inventory):
+            data["product_inventory"] = new_inventory
+            return self.save_data(data)
+        return False
     
     # 混凝土实验
     def get_all_concrete_experiments(self):
