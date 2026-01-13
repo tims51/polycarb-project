@@ -15,6 +15,7 @@ from page_modules.data_recording import render_data_recording
 from page_modules.data_management import render_data_management
 from page_modules.data_analysis import render_analysis_page
 from page_modules.sap_bom import render_sap_bom
+from page_modules.product_inventory import render_product_inventory_page
 from utils.mobile_helper import render_mobile_connect_sidebar
 from utils.internet_helper import render_internet_access_sidebar
 from utils.ui_manager import render_ui_settings, load_global_css
@@ -50,9 +51,10 @@ load_global_css(
 PAGE_ROUTES = {
     "📊 项目概览": lambda: render_dashboard(data_manager),
     "🧪 实验管理": lambda: render_experiment_management(data_manager),
-    "� 原材料管理": lambda: render_raw_material_management(data_manager),
-    "�📝 数据记录": lambda: render_data_recording(data_manager),
     "🏭 SAP/BOM": lambda: render_sap_bom(data_manager),
+    "📦 成品库存": lambda: render_product_inventory_page(data_manager),
+    " 原材料管理": lambda: render_raw_material_management(data_manager),
+    "📝 数据记录": lambda: render_data_recording(data_manager),
     "💾 数据管理": lambda: render_data_management(data_manager),
     "📈 数据分析": lambda: render_analysis_page(data_manager),
     "📄 报告生成": lambda: render_report_page()

@@ -1451,6 +1451,86 @@ class DataManager:
             data["mortar_experiments"] = experiments
             return self.save_data(data)
         return False
+
+    # -----------------------------------------------------------
+    # 产品库存管理 (Product Inventory)
+    # -----------------------------------------------------------
+    
+    def get_product_inventory(self):
+        """获取所有产品库存"""
+        data = self.load_data()
+        return data.get("product_inventory", [])
+        
+    def add_product_inventory_record(self, record_data):
+        """
+        添加产品库存记录 (入库/出库)
+        record_data: {
+            "product_name": str,
+            "product_type": str, (母液/速凝剂/防冻剂/减水剂/...)
+            "quantity": float, (吨)
+            "type": "in" | "out",
+            "reason": str,
+            "operator": str,
+            "date": str
+        }
+        """
+        data = self.load_data()
+        inventory = data.get("product_inventory", [])
+        records = data.get("product_inventory_records", [])
+        
+        # 1. 更新库存快照
+        product_name = record_data.get("product_name")
+        product_type = record_data.get("product_type", "其他")
+        qty = float(record_data.get("quantity", 0.0))
+        op_type = record_data.get("type")
+        
+        target_item = next((p for p in inventory if p["name"] == product_name and p.get("type") == product_type), None)
+        
+        if not target_item:
+            # 新增产品
+            if op_type == "out":
+                return False, "库存不足 (产品不存在)"
+            
+            target_item = {
+                "id": max([p.get("id", 0) for p in inventory], default=0) + 1,
+                "name": product_name,
+                "type": product_type,
+                "stock_quantity": qty,
+                "unit": "吨",
+                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            inventory.append(target_item)
+        else:
+            # 更新现有产品
+            current_stock = float(target_item.get("stock_quantity", 0.0))
+            if op_type == "in":
+                target_item["stock_quantity"] = current_stock + qty
+            else:
+                if current_stock < qty:
+                    # 允许负库存? 暂时允许警告但继续，或者禁止
+                    pass 
+                target_item["stock_quantity"] = current_stock - qty
+            
+            target_item["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+        # 2. 添加流水记录
+        new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+        record_data["id"] = new_rec_id
+        record_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        record_data["snapshot_stock"] = target_item["stock_quantity"]
+        records.append(record_data)
+        
+        data["product_inventory"] = inventory
+        data["product_inventory_records"] = records
+        
+        if self.save_data(data):
+            return True, "库存更新成功"
+        return False, "保存失败"
+
+    def get_product_inventory_records(self):
+        """获取产品库存流水"""
+        data = self.load_data()
+        return data.get("product_inventory_records", [])
     
     # 混凝土实验
     def get_all_concrete_experiments(self):
