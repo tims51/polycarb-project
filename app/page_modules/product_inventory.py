@@ -190,119 +190,158 @@ def render_product_inventory_page(data_manager):
             
         df_edit = df_edit[cols_to_use]
         
-        # 使用 data_editor
-        edited_df = st.data_editor(
-            df_edit,
-            key="prod_inv_editor",
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "id": None, # 隐藏 ID
-                "name": st.column_config.TextColumn("产品名称", required=True),
-                "type": st.column_config.SelectboxColumn("分类", options=categories, required=True),
-                "stock_quantity": st.column_config.NumberColumn("当前库存", disabled=True, format="%.2f 吨"),
-                "min_stock": st.column_config.NumberColumn("最低库存", min_value=0.0, step=0.1, format="%.2f"),
-                "max_stock": st.column_config.NumberColumn("最高库存", min_value=0.0, step=0.1, format="%.2f"),
-                "unit": st.column_config.TextColumn("单位"),
-                "last_update": st.column_config.DatetimeColumn("最后更新时间", disabled=True, format="YYYY-MM-DD HH:mm"),
-            },
-            disabled=["stock_quantity", "last_update"],
-            num_rows="dynamic" # 启用添加和删除行功能
-        )
-        
-        # 处理变更 (编辑、添加、删除)
-        # 注意：为了处理删除，我们需要比较 session_state 中的 deleted_rows
-        
-        if "prod_inv_editor" in st.session_state:
-            editor_state = st.session_state["prod_inv_editor"]
-            any_success = False
+        # 密码验证状态
+        if "inventory_edit_auth" not in st.session_state:
+            st.session_state.inventory_edit_auth = False
             
-            # 1. 处理删除 (deleted_rows)
-            # deleted_rows is a list of integers (indices)
-            if editor_state.get("deleted_rows"):
-                deleted_indices = editor_state["deleted_rows"]
-                # 注意：删除操作需要谨慎，最好有确认，但在 data_editor 中很难做二次确认
-                # 我们直接执行删除
-                
-                ids_to_delete = []
-                for idx in deleted_indices:
-                    if idx < len(df_edit):
-                         ids_to_delete.append(int(df_edit.iloc[idx]["id"]))
-                
-                if ids_to_delete:
-                    for pid in ids_to_delete:
-                        if data_manager.delete_product_inventory_item(pid):
-                            any_success = True
+        # 权限控制区域
+        if not st.session_state.inventory_edit_auth:
+            st.info("🔒 编辑模式已锁定，请输入管理员密码解锁")
+            pwd_col1, pwd_col2 = st.columns([2, 1])
+            with pwd_col1:
+                admin_pwd = st.text_input("管理员密码", type="password", key="inv_edit_pwd", label_visibility="collapsed", placeholder="请输入密码")
+            with pwd_col2:
+                if st.button("🔓 解锁编辑", key="btn_unlock_inv"):
+                    if admin_pwd == "admin": # 简单硬编码密码，实际应从配置读取
+                        st.session_state.inventory_edit_auth = True
+                        st.rerun()
+                    else:
+                        st.error("密码错误")
             
-            # 2. 处理编辑 (edited_rows)
-            if editor_state.get("edited_rows"):
-                updates_map = editor_state["edited_rows"]
-                updates_to_process = []
-                
-                for idx, changes in updates_map.items():
-                    if idx < len(df_edit):
-                        row_id = int(df_edit.iloc[idx]["id"])
-                        
-                        # 检查实质性变更
-                        real_changes = {}
-                        original_row = df_edit.iloc[idx]
-                        
-                        for col, new_val in changes.items():
-                            old_val = original_row[col]
-                            if old_val != new_val:
-                                real_changes[col] = new_val
-                                
-                        if real_changes:
-                            updates_to_process.append((row_id, real_changes))
-                
-                if updates_to_process:
-                    for prod_id, changes in updates_to_process:
-                        if data_manager.update_product_inventory_item(prod_id, changes):
-                            any_success = True
+            # 锁定状态下只显示表格，不可编辑
+            st.dataframe(
+                df_edit,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "id": None,
+                    "name": "产品名称",
+                    "type": "分类",
+                    "stock_quantity": st.column_config.NumberColumn("当前库存", format="%.2f 吨"),
+                    "min_stock": st.column_config.NumberColumn("最低库存", format="%.2f 吨"),
+                    "max_stock": st.column_config.NumberColumn("最高库存", format="%.2f 吨"),
+                    "unit": "单位",
+                    "last_update": st.column_config.DatetimeColumn("最后更新时间", format="YYYY-MM-DD HH:mm"),
+                }
+            )
             
-            # 3. 处理新增 (added_rows)
-            # data_editor 支持 num_rows="dynamic" 后，用户可以在最后一行添加
-            if editor_state.get("added_rows"):
-                added_rows = editor_state["added_rows"]
-                for row_data in added_rows:
-                    # 必填字段检查
-                    if row_data.get("name") and row_data.get("type"):
-                        # 构造新增数据
-                        # 注意：这里我们复用 add_product_inventory_record 逻辑，
-                        # 但这个函数是设计给流水记录用的，它会同时创建库存项和流水
-                        # 我们这里只想创建库存项 (初始库存为0或指定值)
-                        # 如果 data_manager 没有单独创建库存项的方法，我们可以模拟一次入库操作
-                        # 或者直接调用 add_product_inventory_record
-                        
-                        # 准备数据
-                        new_record = {
-                            "product_name": row_data.get("name"),
-                            "product_type": row_data.get("type"),
-                            "quantity": float(row_data.get("stock_quantity", 0.0)),
-                            "type": "in", # 初始入库
-                            "reason": "手动添加库存项",
-                            "operator": "User",
-                            "date": datetime.now().strftime("%Y-%m-%d")
-                        }
-                        
-                        # 补充其他字段
-                        if "unit" in row_data: new_record["unit"] = row_data["unit"] # 注意 add_product_inventory_record 是否支持 unit 更新
-                        
-                        # 调用现有接口添加
-                        # 注意：add_product_inventory_record 会处理如果不存在则创建的逻辑
-                        success, msg = data_manager.add_product_inventory_record(new_record)
-                        if success:
-                            # 如果有 min/max stock，需要额外更新
-                            # 获取新创建的 ID (这里比较麻烦，因为 add_product_inventory_record 没有返回 ID)
-                            # 我们可以通过名称重新查找
-                            # 简化起见，先只做添加
-                            any_success = True
-            
-            if any_success:
-                st.toast("库存信息已更新")
-                import time
-                time.sleep(0.5)
+        else:
+            # 已解锁状态，显示可编辑表格和锁定按钮
+            if st.button("🔒 锁定编辑", key="btn_lock_inv"):
+                st.session_state.inventory_edit_auth = False
                 st.rerun()
+                
+            # 使用 data_editor
+            edited_df = st.data_editor(
+                df_edit,
+                key="prod_inv_editor",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "id": None, # 隐藏 ID
+                    "name": st.column_config.TextColumn("产品名称", required=True),
+                    "type": st.column_config.SelectboxColumn("分类", options=categories, required=True),
+                    "stock_quantity": st.column_config.NumberColumn("当前库存", disabled=True, format="%.2f 吨"),
+                    "min_stock": st.column_config.NumberColumn("最低库存", min_value=0.0, step=0.1, format="%.2f"),
+                    "max_stock": st.column_config.NumberColumn("最高库存", min_value=0.0, step=0.1, format="%.2f"),
+                    "unit": st.column_config.TextColumn("单位"),
+                    "last_update": st.column_config.DatetimeColumn("最后更新时间", disabled=True, format="YYYY-MM-DD HH:mm"),
+                },
+                disabled=["stock_quantity", "last_update"],
+                num_rows="dynamic" # 启用添加和删除行功能
+            )
+            
+            # 处理变更 (编辑、添加、删除)
+            # 注意：为了处理删除，我们需要比较 session_state 中的 deleted_rows
+            
+            if "prod_inv_editor" in st.session_state:
+                editor_state = st.session_state["prod_inv_editor"]
+                any_success = False
+                
+                # 1. 处理删除 (deleted_rows)
+                # deleted_rows is a list of integers (indices)
+                if editor_state.get("deleted_rows"):
+                    deleted_indices = editor_state["deleted_rows"]
+                    
+                    ids_to_delete = []
+                    for idx in deleted_indices:
+                        if idx < len(df_edit):
+                             ids_to_delete.append(int(df_edit.iloc[idx]["id"]))
+                    
+                    if ids_to_delete:
+                        for pid in ids_to_delete:
+                            if data_manager.delete_product_inventory_item(pid):
+                                any_success = True
+                
+                # 2. 处理编辑 (edited_rows)
+                if editor_state.get("edited_rows"):
+                    updates_map = editor_state["edited_rows"]
+                    updates_to_process = []
+                    
+                    for idx, changes in updates_map.items():
+                        if idx < len(df_edit):
+                            row_id = int(df_edit.iloc[idx]["id"])
+                            
+                            # 检查实质性变更
+                            real_changes = {}
+                            original_row = df_edit.iloc[idx]
+                            
+                            for col, new_val in changes.items():
+                                old_val = original_row[col]
+                                if old_val != new_val:
+                                    real_changes[col] = new_val
+                                    
+                            if real_changes:
+                                updates_to_process.append((row_id, real_changes))
+                    
+                    if updates_to_process:
+                        for prod_id, changes in updates_to_process:
+                            if data_manager.update_product_inventory_item(prod_id, changes):
+                                any_success = True
+                
+                # 3. 处理新增 (added_rows)
+                # data_editor 支持 num_rows="dynamic" 后，用户可以在最后一行添加
+                if editor_state.get("added_rows"):
+                    added_rows = editor_state["added_rows"]
+                    for row_data in added_rows:
+                        # 必填字段检查
+                        if row_data.get("name") and row_data.get("type"):
+                            # 构造新增数据
+                            # 注意：这里我们复用 add_product_inventory_record 逻辑，
+                            # 但这个函数是设计给流水记录用的，它会同时创建库存项和流水
+                            # 我们这里只想创建库存项 (初始库存为0或指定值)
+                            # 如果 data_manager 没有单独创建库存项的方法，我们可以模拟一次入库操作
+                            # 或者直接调用 add_product_inventory_record
+                            
+                            # 准备数据
+                            new_record = {
+                                "product_name": row_data.get("name"),
+                                "product_type": row_data.get("type"),
+                                "quantity": float(row_data.get("stock_quantity", 0.0)),
+                                "type": "in", # 初始入库
+                                "reason": "手动添加库存项",
+                                "operator": "User",
+                                "date": datetime.now().strftime("%Y-%m-%d")
+                            }
+                            
+                            # 补充其他字段
+                            if "unit" in row_data: new_record["unit"] = row_data["unit"] # 注意 add_product_inventory_record 是否支持 unit 更新
+                            
+                            # 调用现有接口添加
+                            # 注意：add_product_inventory_record 会处理如果不存在则创建的逻辑
+                            success, msg = data_manager.add_product_inventory_record(new_record)
+                            if success:
+                                # 如果有 min/max stock，需要额外更新
+                                # 获取新创建的 ID (这里比较麻烦，因为 add_product_inventory_record 没有返回 ID)
+                                # 我们可以通过名称重新查找
+                                # 简化起见，先只做添加
+                                any_success = True
+                
+                if any_success:
+                    st.toast("库存信息已更新")
+                    import time
+                    time.sleep(0.5)
+                    st.rerun()
         
     # 4. 历史记录
     with st.expander("📜 历史流水记录"):
