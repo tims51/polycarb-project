@@ -296,7 +296,7 @@ def _render_version_editor(data_manager, version, mat_options):
                         st.rerun()
     
     st.divider()
-    with st.expander("➕ 添加明细行", expanded=False):
+    with st.expander("➕ 单个添加 | 📂 批量导入 (Excel)", expanded=False):
         if locked and not st.session_state[auth_key]:
             st.info("版本已保存，修改需要管理员密码")
             with st.form(key=f"pwd_edit_{version['id']}"):
