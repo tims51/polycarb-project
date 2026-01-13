@@ -35,7 +35,8 @@ def render_product_inventory_page(data_manager):
                 if existing_products:
                     product_mode = st.radio("选择产品", ["选择现有", "新增产品"], horizontal=True, label_visibility="collapsed")
                     if product_mode == "选择现有":
-                        op_name = st.selectbox("产品名称*", existing_products)
+                        # 添加一个空白选项作为默认值
+                        op_name = st.selectbox("产品名称*", [""] + existing_products, index=0)
                     else:
                         op_name = st.text_input("输入新产品名称*")
                 else:
