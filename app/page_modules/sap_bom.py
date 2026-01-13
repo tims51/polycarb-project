@@ -584,40 +584,43 @@ def _render_inventory_reports(data_manager):
     tab_bal, tab_ledger = st.tabs(["💰 库存余额", "📝 台账流水"])
     
     with tab_bal:
-        balances = data_manager.get_stock_balance()
+        # 修改逻辑：不再使用 get_stock_balance (纯流水计算)，
+        # 而是直接读取原材料主数据的当前库存 (stock_quantity)，因为它包含了初始库存和所有变动。
+        # 这样能保证数据的一致性。
+        
         materials = data_manager.get_all_raw_materials()
-        mat_map = {m['id']: m for m in materials}
         
         report_data = []
-        for mid, qty in balances.items():
-            mat = mat_map.get(mid)
-            if mat:
-                # 转换单位：系统默认存储单位通常为 kg（或原始单位），这里统一转换为吨显示
-                # 假设系统内部单位为 kg
-                stock_kg = float(qty)
-                stock_ton = stock_kg / 1000.0
-                
-                # 如果原单位本身就是吨，则不需要除以1000（这里需要根据实际单位判断）
-                # 简单起见，我们假设 unit 为 kg 时转吨；为 ton 时直接用；其他单位保留原样
-                unit = mat.get('unit', 'kg').lower()
-                
-                display_qty = stock_ton
+        for mat in materials:
+            # 1. 获取当前库存 (基础单位)
+            stock_qty = float(mat.get('stock_quantity', 0.0))
+            base_unit = mat.get('unit', 'kg')
+            
+            # 2. 单位转换 (转为吨)
+            # 逻辑：
+            # - 如果基础单位是 kg/g/lb 等质量单位 -> 转为 ton
+            # - 如果基础单位是 L/mL 等体积单位 -> 保持原样或转为 m3 (这里暂保持原样)
+            # - 如果已经是 ton -> 保持原样
+            
+            from utils.unit_helper import convert_quantity, normalize_unit
+            
+            # 尝试转换到吨
+            display_qty, success = convert_quantity(stock_qty, base_unit, 'ton')
+            
+            if success:
                 display_unit = "吨"
-                
-                if unit in ['ton', 't', '吨']:
-                    display_qty = stock_kg # 原本就是吨
-                elif unit not in ['kg', 'kgs', '公斤', '千克']:
-                    # 非质量单位或非常规单位，保持原样
-                    display_qty = stock_kg
-                    display_unit = mat.get('unit', 'kg')
-                
-                report_data.append({
-                    "物料名称": mat['name'],
-                    "物料号": mat.get('material_number'),
-                    "当前库存 (吨)": f"{display_qty:.4f}", # 保留4位小数
-                    "原始库存": f"{stock_kg:.2f}",
-                    "原始单位": mat.get('unit', 'kg')
-                })
+            else:
+                # 转换失败 (非质量单位)，保持原值
+                display_qty = stock_qty
+                display_unit = base_unit
+            
+            report_data.append({
+                "物料名称": mat['name'],
+                "物料号": mat.get('material_number'),
+                "当前库存 (吨)": f"{display_qty:.4f}" if success else f"{display_qty:.4f} ({display_unit})",
+                "原始库存": f"{stock_qty:.4f}",
+                "原始单位": base_unit
+            })
         
         if report_data:
             st.dataframe(pd.DataFrame(report_data), use_container_width=True)
