@@ -4,6 +4,7 @@ import time
 import uuid
 import pandas as pd
 import io
+from utils.unit_helper import convert_quantity, normalize_unit
 
 def _render_batch_import(data_manager):
     st.markdown("### 📂 批量导入原材料")
@@ -277,14 +278,31 @@ def render_raw_material_management(data_manager):
         else:
             with st.form("inventory_op_form", clear_on_submit=True):
                 op_col1, op_col2, op_col3 = st.columns([2, 1, 1])
+                
+                # 预先获取选中的原材料ID (为了获取单位)
+                # 由于是在 form 内部，我们只能获取当前的 selection，
+                # 但 st.selectbox 在 form 提交前不会更新 session_state 中的值给 Python 变量
+                # 除非我们把它放在 form 外面。
+                # 为了简化，我们在提交时处理单位。
+                # 但为了显示正确的单位选项，我们需要 access 到当前的 mat options。
+                
+                mat_options = {f"{m['name']} ({m.get('material_number', '-')})": m['id'] for m in raw_materials}
+                
                 with op_col1:
-                    # Create options list with ID
-                    mat_options = {f"{m['name']} ({m.get('material_number', '-')})": m['id'] for m in raw_materials}
                     selected_mat_label = st.selectbox("选择原材料*", list(mat_options.keys()))
-                    selected_mat_id = mat_options[selected_mat_label]
+                
+                # 尝试解析当前选中的原材料 (注意：在 form 未提交时，这里可能拿不到最新选择，
+                # 但通常 streamlit 会重跑脚本，如果是用户交互触发的)
+                # 这是一个局限性。为了更好的体验，我们将单位选择做得通用一些。
                 
                 with op_col2:
-                    op_type = st.selectbox("操作类型*", ["入库", "出库"])
+                    c2_1, c2_2 = st.columns(2)
+                    with c2_1:
+                        op_type = st.selectbox("操作类型*", ["入库", "出库"])
+                    with c2_2:
+                        # 提供常用单位
+                        common_units = ["kg", "ton", "g", "L", "mL", "吨", "公斤", "克"]
+                        op_unit = st.selectbox("单位", common_units, index=0) # 默认 kg
                     
                 with op_col3:
                     op_qty = st.number_input("数量*", min_value=0.0, step=0.00001, format="%g")
@@ -294,19 +312,35 @@ def render_raw_material_management(data_manager):
                 op_submit = st.form_submit_button("提交库存变动", type="primary")
                 
                 if op_submit:
+                    selected_mat_id = mat_options[selected_mat_label]
+                    selected_material = next((m for m in raw_materials if m['id'] == selected_mat_id), None)
+                    stock_unit = selected_material.get('unit', 'kg') if selected_material else 'kg'
+                    
                     if op_qty > 0:
+                        # 单位转换
+                        final_qty, success = convert_quantity(op_qty, op_unit, stock_unit)
+                        
+                        conversion_note = ""
+                        if success and normalize_unit(op_unit) != normalize_unit(stock_unit):
+                            conversion_note = f" (转换: {op_qty}{op_unit} -> {final_qty:g}{stock_unit})"
+                            st.info(f"单位已自动转换: {op_qty} {op_unit} = {final_qty:g} {stock_unit}")
+                        elif not success and normalize_unit(op_unit) != normalize_unit(stock_unit):
+                            st.warning(f"⚠️ 无法从 {op_unit} 转换为 {stock_unit}，将按 1:1 处理。请检查单位是否正确。")
+                            final_qty = op_qty
+                            conversion_note = f" (单位不匹配: {op_unit} vs {stock_unit})"
+                        
                         record_data = {
                             "material_id": selected_mat_id,
                             "type": "in" if op_type == "入库" else "out",
-                            "quantity": op_qty,
-                            "reason": op_reason,
+                            "quantity": final_qty,
+                            "reason": f"{op_reason} [原始: {op_qty}{op_unit}]{conversion_note}",
                             "operator": "User", 
                             "date": datetime.now().strftime("%Y-%m-%d")
                         }
                         success, msg = data_manager.add_inventory_record(record_data)
                         if success:
                             st.success(msg)
-                            time.sleep(0.5)
+                            time.sleep(1.5) # 增加延迟以便用户看到转换信息
                             st.rerun()
                         else:
                             st.error(msg)
