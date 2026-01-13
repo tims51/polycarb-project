@@ -424,7 +424,7 @@ def render_raw_material_management(data_manager):
             
             if not selected_rows.empty:
                 st.info(f"已选择 {len(selected_rows)} 项")
-                action_col1, action_col2, _ = st.columns([1, 1, 4])
+                action_col1, action_col2, action_col3, _ = st.columns([1, 1, 1.2, 2.8])
                 
                 with action_col1:
                     # 编辑按钮 (仅当选中1项时可用)
@@ -447,6 +447,42 @@ def render_raw_material_management(data_manager):
                             st.rerun()
                         else:
                             st.warning("目前仅支持单项删除，请只选择一项。")
+
+                with action_col3:
+                    # 复制添加按钮
+                    if st.button("📋 复制添加选中项", type="secondary", use_container_width=True):
+                        success_count = 0
+                        fail_count = 0
+                        
+                        for idx, row in selected_rows.iterrows():
+                            original_id = int(row["id"])
+                            original_mat = next((m for m in raw_materials if m["id"] == original_id), None)
+                            
+                            if original_mat:
+                                new_mat = original_mat.copy()
+                                if "id" in new_mat: del new_mat["id"]
+                                
+                                # 生成唯一后缀
+                                suffix = datetime.now().strftime("%H%M%S") + str(uuid.uuid4())[:4]
+                                
+                                new_mat["name"] = f"{new_mat['name']}_copy"
+                                if new_mat.get("material_number"):
+                                    new_mat["material_number"] = f"{new_mat['material_number']}_{suffix}"
+                                
+                                new_mat["created_date"] = datetime.now().strftime("%Y-%m-%d")
+                                new_mat["stock_quantity"] = 0 # 复制时不复制库存
+                                
+                                success, msg = data_manager.add_raw_material(new_mat)
+                                if success:
+                                    success_count += 1
+                                else:
+                                    fail_count += 1
+                                    st.error(f"复制 {row.get('名称', '')} 失败: {msg}")
+                        
+                        if success_count > 0:
+                            st.success(f"成功复制 {success_count} 项")
+                            time.sleep(1)
+                            st.rerun()
 
             # --------------------------------------------------------
             # 以下是原有的弹窗和编辑表单逻辑 (保持不变)
