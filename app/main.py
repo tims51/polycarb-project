@@ -53,7 +53,7 @@ PAGE_ROUTES = {
     "🧪 实验管理": lambda: render_experiment_management(data_manager),
     "🏭 SAP/BOM": lambda: render_sap_bom(data_manager),
     "📦 成品库存": lambda: render_product_inventory_page(data_manager),
-    " 原材料管理": lambda: render_raw_material_management(data_manager),
+    "🧱 原材料管理": lambda: render_raw_material_management(data_manager),
     "📝 数据记录": lambda: render_data_recording(data_manager),
     "💾 数据管理": lambda: render_data_management(data_manager),
     "📈 数据分析": lambda: render_analysis_page(data_manager),
