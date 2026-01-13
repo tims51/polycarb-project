@@ -664,8 +664,70 @@ def _render_inventory_reports(data_manager):
         records = data_manager.get_inventory_records()
         if records:
             df = pd.DataFrame(records)
-            # 简单的列重命名
-            st.dataframe(df.sort_values("created_at", ascending=False), use_container_width=True)
+            
+            # 1. 增加筛选器
+            col_f1, col_f2, col_f3 = st.columns(3)
+            with col_f1:
+                # 提取所有物料名称供筛选
+                unique_materials = sorted(list(set(df['material_name'].dropna().unique())))
+                sel_mat = st.multiselect("筛选物料", unique_materials)
+            with col_f2:
+                # 提取操作类型 (in/out) 并转为中文显示
+                type_map = {"in": "入库", "out": "出库"}
+                sel_type = st.multiselect("筛选类型", ["入库", "出库"])
+            with col_f3:
+                # 日期范围
+                min_date = pd.to_datetime(df['created_at']).min().date()
+                max_date = pd.to_datetime(df['created_at']).max().date()
+                sel_date = st.date_input("日期范围", [min_date, max_date])
+
+            # 应用筛选
+            if sel_mat:
+                df = df[df['material_name'].isin(sel_mat)]
+            if sel_type:
+                # 将中文类型转回英文代码进行筛选
+                filter_codes = [k for k, v in type_map.items() if v in sel_type]
+                df = df[df['type'].isin(filter_codes)]
+            if isinstance(sel_date, list) and len(sel_date) == 2:
+                 # 简单的字符串比较筛选 (前提是 created_at 格式为 YYYY-MM-DD HH:MM:SS)
+                 start_str = sel_date[0].strftime("%Y-%m-%d")
+                 end_str = sel_date[1].strftime("%Y-%m-%d")
+                 df = df[(df['created_at'] >= start_str) & (df['created_at'] <= end_str + " 23:59:59")]
+
+            # 2. 数据美化与列重命名
+            # 确保按时间倒序
+            df = df.sort_values("created_at", ascending=False)
+            
+            # 映射类型显示
+            df['type_display'] = df['type'].map({"in": "📥 入库", "out": "📤 出库"}).fillna(df['type'])
+            
+            # 格式化数量 (添加单位)
+            # 假设 unit 列存在，如果不存在则默认为 kg
+            if 'unit' not in df.columns:
+                df['unit'] = 'kg'
+            df['qty_display'] = df.apply(lambda x: f"{float(x['quantity']):.4f} {x['unit']}", axis=1)
+            
+            # 选择并重命名列
+            # 原始列: id, material_id, material_name, type, quantity, unit, price, created_at, operator, remark, batch_info
+            display_cols = {
+                "created_at": "时间",
+                "material_name": "物料名称",
+                "type_display": "操作类型",
+                "qty_display": "数量",
+                "operator": "操作人",
+                "remark": "备注"
+            }
+            
+            # 确保存在的列才显示
+            available_cols = [c for c in display_cols.keys() if c in df.columns or c in ['type_display', 'qty_display']]
+            
+            df_display = df[available_cols].rename(columns=display_cols)
+            
+            st.dataframe(
+                df_display, 
+                use_container_width=True,
+                hide_index=True
+            )
         else:
             st.info("暂无台账记录")
 
