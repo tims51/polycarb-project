@@ -296,43 +296,43 @@ def _render_version_editor(data_manager, version, mat_options):
                         st.rerun()
     
     st.divider()
-    st.markdown("➕ 添加明细行")
-    if locked and not st.session_state[auth_key]:
-        st.info("版本已保存，修改需要管理员密码")
-        with st.form(key=f"pwd_edit_{version['id']}"):
-            pwd = st.text_input("管理员密码", type="password")
-            submitted = st.form_submit_button("开始修改")
-            if submitted and pwd == "admin":
-                st.session_state[auth_key] = True
-                st.success("已验证")
-                st.rerun()
-            elif submitted:
-                st.error("密码错误")
-    else:
-        with st.form(f"add_line_form_{version['id']}", clear_on_submit=True):
-            lc1, lc2, lc3 = st.columns([3, 1, 1])
-            with lc1:
-                sel_mat_label = st.selectbox("选择原材料", list(mat_options.keys()))
-            with lc2:
-                l_qty = st.number_input("数量", min_value=0.0, step=0.1)
-            with lc3:
-                l_phase = st.text_input("阶段 (e.g. A料)", value="")
-            submitted = st.form_submit_button("添加")
-            if submitted:
-                mat_id = mat_options[sel_mat_label]
-                mat_name = sel_mat_label.split(' (')[0]
-                new_line = {
-                    "item_type": "raw_material",
-                    "item_id": mat_id,
-                    "item_name": mat_name,
-                    "qty": l_qty,
-                    "uom": "kg",
-                    "phase": l_phase,
-                    "remark": ""
-                }
-                current_lines.append(new_line)
-                data_manager.update_bom_version(version['id'], {"lines": current_lines})
-                st.rerun()
+    with st.expander("➕ 添加明细行", expanded=False):
+        if locked and not st.session_state[auth_key]:
+            st.info("版本已保存，修改需要管理员密码")
+            with st.form(key=f"pwd_edit_{version['id']}"):
+                pwd = st.text_input("管理员密码", type="password")
+                submitted = st.form_submit_button("开始修改")
+                if submitted and pwd == "admin":
+                    st.session_state[auth_key] = True
+                    st.success("已验证")
+                    st.rerun()
+                elif submitted:
+                    st.error("密码错误")
+        else:
+            with st.form(f"add_line_form_{version['id']}", clear_on_submit=True):
+                lc1, lc2, lc3 = st.columns([3, 1, 1])
+                with lc1:
+                    sel_mat_label = st.selectbox("选择原材料", list(mat_options.keys()))
+                with lc2:
+                    l_qty = st.number_input("数量", min_value=0.0, step=0.1)
+                with lc3:
+                    l_phase = st.text_input("阶段 (e.g. A料)", value="")
+                submitted = st.form_submit_button("添加")
+                if submitted:
+                    mat_id = mat_options[sel_mat_label]
+                    mat_name = sel_mat_label.split(' (')[0]
+                    new_line = {
+                        "item_type": "raw_material",
+                        "item_id": mat_id,
+                        "item_name": mat_name,
+                        "qty": l_qty,
+                        "uom": "kg",
+                        "phase": l_phase,
+                        "remark": ""
+                    }
+                    current_lines.append(new_line)
+                    data_manager.update_bom_version(version['id'], {"lines": current_lines})
+                    st.rerun()
     st.divider()
     if not locked:
         if st.button("保存版本", key=f"save_version_{version['id']}"):
