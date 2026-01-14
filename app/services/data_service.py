@@ -12,8 +12,8 @@ from typing import Dict, List, Any, Optional, Union
 from pathlib import Path
 import streamlit as st
 
-from config import DATA_FILE, BACKUP_DIR
-from services.timeline_service import TimelineService
+from app.config import DATA_FILE, BACKUP_DIR
+from app.services.timeline_service import TimelineService
 
 logger = logging.getLogger(__name__)
 

@@ -13,6 +13,11 @@ def render_data_management(data_manager):
     """渲染数据管理页面"""
     st.header("💾 数据管理")
     
+    user = st.session_state.get("current_user")
+    if not user or user.get("role") != "admin":
+        st.info("仅管理员可以访问数据管理与备份功能。")
+        return
+    
     # 使用标签页组织功能
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🗂️ 实验数据管理",
@@ -888,10 +893,7 @@ def _render_backup_tab(data_manager):
             df = pd.DataFrame(backup_data)
             st.dataframe(df, use_container_width=True, hide_index=True)
         
-        # 备份操作
         st.markdown("### 🔧 备份操作")
-        
-        # 密码验证
         password = st.text_input("请输入管理员密码 (删除操作需要)", type="password", key="backup_op_password")
         
         col1, col2, col3, col4 = st.columns(4)
@@ -927,7 +929,7 @@ def _render_backup_tab(data_manager):
 
         with col3:
              if st.button("🗑️ 删除选中", disabled=not selected_backup, type="secondary", use_container_width=True):
-                if password == "admin":
+                if data_manager.verify_admin_password(password):
                     backup_file = Path(selected_backup)
                     if backup_file.exists():
                         try:
@@ -940,11 +942,11 @@ def _render_backup_tab(data_manager):
                     else:
                         st.error("文件不存在")
                 else:
-                    st.error("密码错误 (默认: admin)")
+                    st.error("密码错误")
         
         with col4:
             if st.button("� 删除所有", type="secondary", use_container_width=True):
-                if password == "admin":
+                if data_manager.verify_admin_password(password):
                     if st.checkbox("确认删除所有?", key="confirm_del_all_backups"): # This checkbox logic inside button might be tricky in Streamlit reruns
                         # Streamlit button click resets on rerun. 
                         # Nested button/checkbox pattern is flaky.
@@ -957,10 +959,9 @@ def _render_backup_tab(data_manager):
                     # Let's use a separate expander for "Delete All" to be safe.
                     pass
                 else:
-                     st.error("密码错误 (默认: admin)")
+                     st.error("密码错误")
                      
-        # Handle Delete All separately to avoid UI nesting issues
-        if password == "admin":
+        if data_manager.verify_admin_password(password):
             with st.expander("🔥 危险操作：删除所有备份", expanded=False):
                 st.warning("此操作将永久删除所有备份文件，不可恢复！")
                 if st.button("确认永久删除所有备份", type="primary"):
@@ -979,7 +980,6 @@ def _render_system_settings_tab(data_manager):
     """渲染系统设置标签页"""
     st.subheader("⚙️ 系统设置")
     
-    # 系统信息
     st.markdown("### 系统信息")
     
     col1, col2, col3 = st.columns(3)
@@ -1003,7 +1003,142 @@ def _render_system_settings_tab(data_manager):
         else:
             st.metric("最后修改", "无")
     
-    # 数据清理选项
+    st.markdown("### 🔐 管理员口令设置")
+    with st.form("admin_password_form"):
+        col_old, col_new, col_confirm = st.columns(3)
+        with col_old:
+            old_pwd = st.text_input("当前口令", type="password", key="admin_pwd_old")
+        with col_new:
+            new_pwd = st.text_input("新口令", type="password", key="admin_pwd_new")
+        with col_confirm:
+            confirm_pwd = st.text_input("确认新口令", type="password", key="admin_pwd_confirm")
+        submitted = st.form_submit_button("保存口令")
+        if submitted:
+            if not old_pwd or not new_pwd or not confirm_pwd:
+                st.error("请完整填写所有字段")
+            elif not data_manager.verify_admin_password(old_pwd):
+                st.error("当前口令错误")
+            elif new_pwd != confirm_pwd:
+                st.error("两次输入的新口令不一致")
+            else:
+                ok = data_manager.set_admin_password(new_pwd)
+                if ok:
+                    st.success("管理员口令已更新")
+                else:
+                    st.error("保存管理员口令失败")
+    
+    st.markdown("### 👤 管理员账号信息")
+    admin_users = data_manager.get_admin_users()
+    if admin_users:
+        cols = st.columns([2, 2, 2])
+        cols[0].markdown("**用户名**")
+        cols[1].markdown("**角色**")
+        cols[2].markdown("**状态**")
+        for u in admin_users:
+            c1, c2, c3 = st.columns([2, 2, 2])
+            c1.write(str(u.get("username", "")))
+            c2.write("管理员")
+            status_label = "启用" if u.get("active", True) else "停用"
+            c3.write(status_label)
+    else:
+        st.info("当前没有激活的管理员用户，系统将自动创建默认管理员。")
+    st.caption("默认情况下，当系统没有管理员用户时，会自动创建用户名为 admin 的管理员账号。其初始密码为环境变量 APP_ADMIN_PASSWORD 的值，如未设置则为 admin。管理员口令仅用于系统设置中的高危操作二次验证，与登录密码相互独立。")
+    
+    st.markdown("### 🔑 管理员登录密码修改")
+    current_user = st.session_state.get("current_user")
+    if not current_user or current_user.get("role") != "admin":
+        st.info("仅管理员登录账号可以在此修改登录密码。")
+    else:
+        with st.form("admin_login_password_form"):
+            col_old, col_new, col_confirm = st.columns(3)
+            with col_old:
+                old_login_pwd = st.text_input("当前登录密码", type="password", key="admin_login_pwd_old")
+            with col_new:
+                new_login_pwd = st.text_input("新登录密码", type="password", key="admin_login_pwd_new")
+            with col_confirm:
+                confirm_login_pwd = st.text_input("确认新登录密码", type="password", key="admin_login_pwd_confirm")
+            submitted_admin_login = st.form_submit_button("保存登录密码")
+            if submitted_admin_login:
+                if not old_login_pwd or not new_login_pwd or not confirm_login_pwd:
+                    st.error("请完整填写所有字段")
+                elif new_login_pwd != confirm_login_pwd:
+                    st.error("两次输入的新登录密码不一致")
+                else:
+                    ok, msg = data_manager.change_user_password(current_user.get("id"), old_login_pwd, new_login_pwd)
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+    
+    st.markdown("### 👥 用户与权限管理")
+    users = data_manager.get_all_users()
+    if users:
+        total_users = len(users)
+        total_admins = len([u for u in users if u.get("role") == "admin" and u.get("active", True)])
+        total_inactive = len([u for u in users if not u.get("active", True)])
+        mc1, mc2, mc3 = st.columns(3)
+        mc1.metric("用户总数", total_users)
+        mc2.metric("激活的管理员", total_admins)
+        mc3.metric("已停用用户", total_inactive)
+        
+        role_options = ["user", "admin"]
+        for u in users:
+            user_id = u.get("id")
+            username = str(u.get("username", ""))
+            current_role = u.get("role", "user")
+            current_active = u.get("active", True)
+            created_at = str(u.get("created_at", ""))
+            
+            box = st.container()
+            with box:
+                c1, c2, c3, c4 = st.columns([2.2, 1.6, 1.4, 2.0])
+                c1.markdown(f"**{username}**")
+                new_role = c2.selectbox(
+                    "角色",
+                    options=role_options,
+                    index=role_options.index(current_role) if current_role in role_options else 0,
+                    key=f"user_role_{user_id}",
+                )
+                new_active = c3.checkbox(
+                    "启用",
+                    value=bool(current_active),
+                    key=f"user_active_{user_id}",
+                )
+                c4.caption(f"创建时间：{created_at}")
+                
+                btn_col1, btn_col2 = st.columns([1, 3])
+                with btn_col1:
+                    if st.button("保存修改", key=f"user_save_{user_id}"):
+                        fields = {}
+                        if new_role != current_role:
+                            fields["role"] = new_role
+                        if bool(new_active) != bool(current_active):
+                            fields["active"] = bool(new_active)
+                        if not fields:
+                            st.info("没有需要保存的变更")
+                        else:
+                            active_admins = [x for x in users if x.get("role") == "admin" and x.get("active", True)]
+                            is_last_admin = (
+                                current_role == "admin"
+                                and current_active
+                                and len(active_admins) <= 1
+                            )
+                            will_remove_admin = ("role" in fields and fields["role"] != "admin") or ("active" in fields and fields["active"] is False)
+                            if is_last_admin and will_remove_admin:
+                                st.error("系统至少需要一个激活的管理员，无法移除最后一个管理员。")
+                            else:
+                                ok = data_manager.update_user(user_id, fields)
+                                if ok:
+                                    st.success("用户信息已更新")
+                                    time.sleep(0.3)
+                                    st.rerun()
+                                else:
+                                    st.error("用户信息更新失败")
+                with btn_col2:
+                    st.caption(f"ID: {user_id}")
+    else:
+        st.info("当前没有用户记录。")
+    
     st.markdown("### 🧹 数据清理")
     
     with st.expander("高级数据清理选项", expanded=False):

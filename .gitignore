@@ -13,6 +13,7 @@ env/
 .idea/
 
 # Project specific
+.trae/
 .public_url
 *.log
 backups/

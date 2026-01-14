@@ -22,9 +22,8 @@ from utils.ui_manager import render_ui_settings, load_global_css
 
 from components.sidebar import render_sidebar
 
-# -------------------- 初始化数据管理器 --------------------
-# Force reload trigger
 data_manager = DataManager()
+data_manager.ensure_default_admin()
 
 # -------------------- 页面配置 --------------------
 st.set_page_config(
@@ -65,15 +64,95 @@ def render_report_page():
     st.header("📄 报告生成")
     st.info("报告生成页面开发中...")
 
+def render_login_page(data_manager: DataManager):
+    st.markdown(
+        """
+        <style>
+        .login-page-title {
+            font-size: 2.4rem;
+            font-weight: 600;
+            background: linear-gradient(120deg, #36cfc9, #597ef7, #9254de);
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        .login-page-subtitle {
+            font-size: 0.95rem;
+            color: #8c8c8c;
+        }
+        .login-accent {
+            font-size: 0.8rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #40a9ff;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    st.markdown("<div class='login-accent'>Polycarboxylate Superplasticizer R&D Platform</div>", unsafe_allow_html=True)
+    st.markdown("<div class='login-page-title'>聚羧酸减水剂研发管理系统</div>", unsafe_allow_html=True)
+    st.markdown("<div class='login-page-subtitle'>统一管理配方、实验、数据与库存的数字化实验室平台</div>", unsafe_allow_html=True)
+    
+    st.markdown("")
+    
+    col_left, col_right = st.columns([1.2, 1])
+    
+    with col_left:
+        st.metric("版本", "v3.0")
+        st.metric("状态", "系统在线")
+        st.markdown("---")
+        st.markdown("**特性**")
+        st.caption("• 实验全流程追踪")
+        st.caption("• 数据自动备份与恢复")
+        st.caption("• 角色权限与安全控制")
+    
+    with col_right:
+        tabs = st.tabs(["登录", "注册"])
+        with tabs[0]:
+            username = st.text_input("用户名", key="login_username_main")
+            password = st.text_input("密码", type="password", key="login_password_main")
+            if st.button("登录", type="primary", use_container_width=True, key="login_btn_main"):
+                ok, user_info = data_manager.authenticate_user(username, password)
+                if ok:
+                    st.session_state.current_user = user_info
+                    st.success(f"欢迎，{user_info['username']}")
+                    time.sleep(0.3)
+                    st.rerun()
+                else:
+                    st.error("用户名或密码错误")
+        with tabs[1]:
+            new_username = st.text_input("新用户名（格式：姓名 手机号，如 张三 13800000000）", key="reg_username_main")
+            new_password = st.text_input("新密码", type="password", key="reg_password_main")
+            new_password2 = st.text_input("确认密码", type="password", key="reg_password2_main")
+            if st.button("注册", use_container_width=True, key="reg_btn_main"):
+                if not new_username or not new_password:
+                    st.error("用户名和密码不能为空")
+                elif new_password != new_password2:
+                    st.error("两次输入的密码不一致")
+                else:
+                    ok, msg = data_manager.create_user(new_username, new_password, role="user")
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+
 def main():
     """主函数"""
-    # 页面标题 (仅在非侧边栏模式下显示，这里可选)
-    # st.title("🧪 聚羧酸减水剂研发管理系统") 
-    
-    # 渲染侧边栏并获取选择
-    # 注意：components/sidebar.py 中的 render_sidebar 已经包含了大部分逻辑
-    # 我们需要传递 data_manager 和 PAGE_ROUTES
-    
+    if "current_user" not in st.session_state:
+        st.session_state.current_user = None
+
+    with st.sidebar:
+        if st.session_state.current_user:
+            st.markdown(f"当前用户：**{st.session_state.current_user['username']}** ({st.session_state.current_user.get('role', 'user')})")
+            if st.button("退出登录", use_container_width=True):
+                st.session_state.current_user = None
+                st.rerun()
+
+    if not st.session_state.current_user:
+        render_login_page(data_manager)
+        return
+
     # 传递给 sidebar 的数据服务 wrapper (简单封装以匹配接口)
     class DataServiceWrapper:
         def get_all_projects(self): return data_manager.get_all_projects()
@@ -81,8 +160,6 @@ def main():
         def get_all_raw_materials(self): return data_manager.get_all_raw_materials()
     
     data_service = DataServiceWrapper()
-    
-    # 调用新的 sidebar 组件
     selected_page_func = render_sidebar(data_service, PAGE_ROUTES)
     
     # 渲染选中的页面

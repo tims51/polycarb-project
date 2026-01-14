@@ -8,6 +8,9 @@ import pandas as pd
 import base64
 from io import BytesIO
 import streamlit as st
+import hashlib
+import os
+import secrets
 
 from core.timeline_manager import TimelineManager
 from utils.logger import logger
@@ -57,7 +60,9 @@ class DataManager:
             "mother_liquors",
             # SAP/BOM Modules
             "inventory_records", "boms", "bom_versions", 
-            "production_orders", "material_issues", "goods_receipts"
+            "production_orders", "material_issues", "goods_receipts",
+            # 用户与权限
+            "users"
         ]
         
         for key in required_keys:
@@ -242,7 +247,8 @@ class DataManager:
             "bom_versions": [],
             "production_orders": [],
             "material_issues": [],
-            "goods_receipts": []
+            "goods_receipts": [],
+            "users": []
         }
     
     # -------------------- 项目CRUD操作 --------------------
@@ -250,6 +256,124 @@ class DataManager:
         """获取所有项目"""
         data = self.load_data()
         return data.get("projects", [])
+
+    # -------------------- 用户与权限管理 --------------------
+    def _hash_password(self, password, salt):
+        value = f"{salt}:{password}".encode("utf-8")
+        return hashlib.sha256(value).hexdigest()
+
+    def get_all_users(self):
+        data = self.load_data()
+        return data.get("users", [])
+
+    def get_user_by_username(self, username):
+        username = str(username or "").strip().lower()
+        users = self.get_all_users()
+        for u in users:
+            if str(u.get("username", "")).strip().lower() == username:
+                return u
+        return None
+
+    def create_user(self, username, password, role="user"):
+        username = str(username or "").strip()
+        if not username or not password:
+            return False, "用户名和密码不能为空"
+        if role != "admin":
+            parts = username.split()
+            if len(parts) != 2:
+                return False, "用户名格式应为“姓名 手机号”"
+            name, mobile = parts[0], parts[1]
+            mobile_str = str(mobile)
+            if not mobile_str.isdigit() or len(mobile_str) != 11 or not mobile_str.startswith(("1",)):
+                return False, "手机号格式不正确，请输入11位手机号码"
+        if self.get_user_by_username(username):
+            return False, "用户名已存在"
+        data = self.load_data()
+        users = data.get("users", [])
+        new_id = max([u.get("id", 0) for u in users], default=0) + 1
+        salt = secrets.token_hex(16)
+        pwd_hash = self._hash_password(password, salt)
+        role_norm = role if role in ["admin", "user"] else "user"
+        users.append({
+            "id": new_id,
+            "username": username,
+            "password_hash": pwd_hash,
+            "salt": salt,
+            "role": role_norm,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "active": True
+        })
+        data["users"] = users
+        if self.save_data(data):
+            return True, "注册成功"
+        return False, "保存失败"
+
+    def authenticate_user(self, username, password):
+        user = self.get_user_by_username(username)
+        if not user or not user.get("active", True):
+            return False, None
+        salt = user.get("salt", "")
+        expected = user.get("password_hash", "")
+        calc = self._hash_password(password, salt)
+        if secrets.compare_digest(calc, expected):
+            return True, {"id": user.get("id"), "username": user.get("username"), "role": user.get("role", "user")}
+        return False, None
+
+    def change_user_password(self, user_id, old_password, new_password):
+        data = self.load_data()
+        users = data.get("users", [])
+        target_index = -1
+        for i, u in enumerate(users):
+            if u.get("id") == user_id:
+                target_index = i
+                break
+        if target_index == -1:
+            return False, "用户不存在"
+        user = users[target_index]
+        salt = user.get("salt", "")
+        expected = user.get("password_hash", "")
+        if not salt or not expected:
+            return False, "当前密码校验失败"
+        calc = self._hash_password(old_password, salt)
+        if not secrets.compare_digest(calc, expected):
+            return False, "当前密码错误"
+        new_salt = secrets.token_hex(16)
+        new_hash = self._hash_password(new_password, new_salt)
+        user["salt"] = new_salt
+        user["password_hash"] = new_hash
+        users[target_index] = user
+        data["users"] = users
+        if self.save_data(data):
+            return True, "登录密码已更新"
+        return False, "保存失败"
+
+    def ensure_default_admin(self):
+        users = self.get_all_users()
+        has_admin = any(u.get("role") == "admin" for u in users)
+        if has_admin:
+            return
+        default_pwd = os.environ.get("APP_ADMIN_PASSWORD") or "admin"
+        ok, msg = self.create_user("admin", default_pwd, role="admin")
+        if ok:
+            logger.info("Default admin user created.")
+
+    def update_user(self, user_id, fields):
+        data = self.load_data()
+        users = data.get("users", [])
+        updated = False
+        for i, u in enumerate(users):
+            if u.get("id") == user_id:
+                users[i].update(fields)
+                updated = True
+                break
+        if updated:
+            data["users"] = users
+            return self.save_data(data)
+        return False
+
+    def get_admin_users(self):
+        users = self.get_all_users()
+        return [u for u in users if u.get("role") == "admin" and u.get("active", True)]
     
     def get_next_project_id(self):
         """获取下一个可用的项目ID"""
@@ -1147,7 +1271,15 @@ class DataManager:
         
         if not target_bom: return False, "关联 BOM 不存在"
         
-        product_name = target_bom.get("bom_name")
+        # 构造产品名称: {bom_code}-{bom_name}
+        bom_code = target_bom.get("bom_code", "").strip()
+        bom_name = target_bom.get("bom_name", "").strip()
+        
+        if bom_code:
+            product_name = f"{bom_code}-{bom_name}"
+        else:
+            product_name = bom_name
+
         # 映射 BOM 类型到产品类型
         # BOM: 母液, 成品, 速凝剂, 防冻剂
         # Product: 母液, 成品, 速凝剂, 防冻剂, 其他
@@ -1232,10 +1364,31 @@ class DataManager:
         
         # 1. 找到对应的 BOM 版本
         bom_version_id = order.get("bom_version_id")
+        bom_id = order.get("bom_id")
         plan_qty = float(order.get("plan_qty", 0.0))
         
-        # 2. 展开 BOM
+        # 2. 展开 BOM（若无明细，回退到最近有效版本）
         lines = self.explode_bom(bom_version_id, plan_qty)
+        if not lines:
+            versions = data.get("bom_versions", [])
+            same_bom_versions = [v for v in versions if str(v.get("bom_id")) == str(bom_id)]
+            fallback_ver = None
+            for v in reversed(same_bom_versions):
+                if v.get("lines"):
+                    fallback_ver = v
+                    break
+            if fallback_ver:
+                # 更新订单所选版本为回退版本
+                for i, o in enumerate(orders):
+                    if o.get("id") == order_id:
+                        orders[i]["bom_version_id"] = fallback_ver["id"]
+                        orders[i]["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        break
+                data["production_orders"] = orders
+                # 重新展开
+                lines = self.explode_bom(fallback_ver["id"], plan_qty)
+            else:
+                return None
         
         # 3. 生成领料单
         issues = data.get("material_issues", [])
@@ -1294,6 +1447,7 @@ class DataManager:
         """
         data = self.load_data()
         issues = data.get("material_issues", [])
+        orders = data.get("production_orders", [])
         target_issue = None
         for issue in issues:
             if issue.get("id") == issue_id:
@@ -1302,6 +1456,8 @@ class DataManager:
         
         if not target_issue: return False, "领料单不存在"
         if target_issue.get("status") == "posted": return False, "领料单已过账"
+        if not target_issue.get("lines"):
+            return False, "领料单没有明细，无法过账"
         
         # 准备批量写入台账
         records = data.get("inventory_records", [])
@@ -1322,6 +1478,7 @@ class DataManager:
                 # 处理产品库存扣减
                 current_stock = 0.0
                 prod_idx = -1
+                expected_name = str(line.get("item_name", "") or "").strip()
                 
                 for idx, p in enumerate(products):
                     if p.get("id") == mid:
@@ -1330,6 +1487,41 @@ class DataManager:
                         break
                 
                 if prod_idx >= 0:
+                    actual_name = str(products[prod_idx].get("name", "") or "").strip()
+                    actual_type = str(products[prod_idx].get("type", "其他") or "").strip()
+                    desired_name = actual_name
+                    desired_type = actual_type
+                    if expected_name:
+                        if expected_name.startswith("YJSNJ-") or expected_name in ["有碱速凝剂", "碱速凝剂"]:
+                            desired_name = "YJSNJ-有碱速凝剂"
+                            desired_type = "有碱速凝剂"
+                        elif expected_name.startswith("WJSNJ-") or expected_name in ["无碱速凝剂"]:
+                            desired_name = "WJSNJ-无碱速凝剂"
+                            desired_type = "无碱速凝剂"
+                        else:
+                            desired_name = expected_name
+                            desired_type = actual_type
+                    corrected = False
+                    if actual_name != desired_name or actual_type != desired_type:
+                        new_idx = -1
+                        for j, pj in enumerate(products):
+                            if str(pj.get("name", "") or "") == desired_name:
+                                new_idx = j
+                                break
+                        if new_idx == -1:
+                            new_id = max([p.get("id", 0) for p in products], default=0) + 1
+                            products.append({
+                                "id": new_id,
+                                "name": desired_name,
+                                "type": desired_type,
+                                "stock_quantity": 0.0,
+                                "unit": products[prod_idx].get("unit", "吨"),
+                                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                            new_idx = len(products) - 1
+                        prod_idx = new_idx
+                        current_stock = float(products[prod_idx].get("stock_quantity", 0.0))
+                        corrected = True
                     stock_unit = products[prod_idx].get("unit", "吨")
                     final_qty, success = convert_quantity(qty, line_uom, stock_unit)
                     
@@ -1342,10 +1534,20 @@ class DataManager:
                     
                     # 写入产品库存台账
                     reason_note = f"生产领料: {target_issue.get('issue_code')}"
+                    if expected_name and corrected:
+                        reason_note += f" (纠正: {expected_name})"
                     if normalize_unit(line_uom) != normalize_unit(stock_unit):
                         reason_note += f" (原: {qty}{line_uom})"
                     
                     new_rec_id = max([r.get("id", 0) for r in product_records], default=0) + 1
+                    rel_order_id = target_issue.get("production_order_id")
+                    rel_bom_id = None
+                    rel_bom_ver = None
+                    if rel_order_id:
+                        ord = next((o for o in orders if o.get("id") == rel_order_id), None)
+                        if ord:
+                            rel_bom_id = ord.get("bom_id")
+                            rel_bom_ver = ord.get("bom_version_id")
                     product_records.append({
                         "id": new_rec_id,
                         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -1356,7 +1558,12 @@ class DataManager:
                         "quantity": final_qty,
                         "reason": reason_note,
                         "operator": operator,
-                        "snapshot_stock": new_stock
+                        "snapshot_stock": new_stock,
+                        "related_doc_type": "ISSUE",
+                        "related_doc_id": issue_id,
+                        "related_order_id": rel_order_id,
+                        "related_bom_id": rel_bom_id,
+                        "related_bom_version_id": rel_bom_ver
                     })
             else:
                 # 处理原材料库存扣减 (原有逻辑)
@@ -1431,6 +1638,9 @@ class DataManager:
         """
         data = self.load_data()
         issues = data.get("material_issues", [])
+        orders = data.get("production_orders", [])
+        products = data.get("product_inventory", [])
+        product_records = data.get("product_inventory_records", [])
         target_issue = None
         for issue in issues:
             if issue.get("id") == issue_id:
@@ -1450,54 +1660,101 @@ class DataManager:
             
             mid = line.get("item_id")
             line_uom = line.get("uom", "kg")
-            
-            # 更新原材料库存（加回）
-            current_stock = 0.0
-            mat_idx = -1
-            is_water = False
-            
-            for idx, m in enumerate(materials):
-                if m.get("id") == mid:
-                    current_stock = float(m.get("stock_quantity", 0.0))
-                    mat_name = m.get("name", "").strip()
-                    water_names = ["水", "自来水", "纯水", "去离子水", "工业用水", "生产用水"]
-                    is_water = mat_name in water_names
-                    mat_idx = idx
-                    break
-            
-            if mat_idx >= 0:
-                # 单位转换
-                stock_unit = materials[mat_idx].get("unit", "kg")
-                final_qty, success = convert_quantity(qty, line_uom, stock_unit)
-
-                if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
-                     logger.warning(f"Unit conversion failed in cancel_issue: {qty} {line_uom} -> {stock_unit}")
-
-                new_stock = current_stock
-                if not is_water:
-                    new_stock = current_stock + final_qty # 恢复库存
-                    materials[mat_idx]["stock_quantity"] = new_stock
-                    materials[mat_idx]["last_stock_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            item_type = line.get("item_type", "raw_material")
+            if item_type == "product":
+                # 成品库存回滚（加回）
+                prod_idx = -1
+                current_stock = 0.0
+                for idx, p in enumerate(products):
+                    if p.get("id") == mid:
+                        prod_idx = idx
+                        current_stock = float(p.get("stock_quantity", 0.0))
+                        break
+                if prod_idx >= 0:
+                    stock_unit = products[prod_idx].get("unit", "吨")
+                    final_qty, success = convert_quantity(qty, line_uom, stock_unit)
+                    if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
+                        logger.warning(f"Unit conversion failed in cancel_issue (product): {qty} {line_uom} -> {stock_unit}")
+                    new_stock = current_stock + final_qty
+                    products[prod_idx]["stock_quantity"] = new_stock
+                    products[prod_idx]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # 写入成品库存冲销台账
+                    reason_note = f"撤销领料: {target_issue.get('issue_code')}"
+                    if normalize_unit(line_uom) != normalize_unit(stock_unit):
+                        reason_note += f" (原: {qty}{line_uom})"
+                    new_rec_id = max([r.get("id", 0) for r in product_records], default=0) + 1
+                    rel_order_id = target_issue.get("production_order_id")
+                    rel_bom_id = None
+                    rel_bom_ver = None
+                    if rel_order_id:
+                        ord = next((o for o in orders if o.get("id") == rel_order_id), None)
+                        if ord:
+                            rel_bom_id = ord.get("bom_id")
+                            rel_bom_ver = ord.get("bom_version_id")
+                    product_records.append({
+                        "id": new_rec_id,
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "product_name": products[prod_idx].get("name"),
+                        "product_type": products[prod_idx].get("type", "其他"),
+                        "type": "return_in",
+                        "quantity": final_qty,
+                        "reason": reason_note,
+                        "operator": operator,
+                        "snapshot_stock": new_stock,
+                        "related_doc_type": "ISSUE_CANCEL",
+                        "related_doc_id": issue_id,
+                        "related_order_id": rel_order_id,
+                        "related_bom_id": rel_bom_id,
+                        "related_bom_version_id": rel_bom_ver
+                    })
+            else:
+                # 更新原材料库存（加回）
+                current_stock = 0.0
+                mat_idx = -1
+                is_water = False
                 
-                # 写入冲销台账
-                reason_note = f"撤销领料: {target_issue.get('issue_code')}"
-                if normalize_unit(line_uom) != normalize_unit(stock_unit):
-                    reason_note += f" (原: {qty}{line_uom})"
+                for idx, m in enumerate(materials):
+                    if m.get("id") == mid:
+                        current_stock = float(m.get("stock_quantity", 0.0))
+                        mat_name = m.get("name", "").strip()
+                        water_names = ["水", "自来水", "纯水", "去离子水", "工业用水", "生产用水"]
+                        is_water = mat_name in water_names
+                        mat_idx = idx
+                        break
+                
+                if mat_idx >= 0:
+                    stock_unit = materials[mat_idx].get("unit", "kg")
+                    final_qty, success = convert_quantity(qty, line_uom, stock_unit)
 
-                new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
-                records.append({
-                    "id": new_rec_id,
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "material_id": mid,
-                    "type": "return_in", # 视为退料入库/冲销
-                    "quantity": final_qty,
-                    "reason": reason_note,
-                    "operator": operator,
-                    "related_doc_type": "ISSUE_CANCEL",
-                    "related_doc_id": issue_id,
-                    "snapshot_stock": new_stock
-                })
+                    if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
+                         logger.warning(f"Unit conversion failed in cancel_issue: {qty} {line_uom} -> {stock_unit}")
+
+                    new_stock = current_stock
+                    if not is_water:
+                        new_stock = current_stock + final_qty
+                        materials[mat_idx]["stock_quantity"] = new_stock
+                        materials[mat_idx]["last_stock_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    reason_note = f"撤销领料: {target_issue.get('issue_code')}"
+                    if normalize_unit(line_uom) != normalize_unit(stock_unit):
+                        reason_note += f" (原: {qty}{line_uom})"
+
+                    new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+                    records.append({
+                        "id": new_rec_id,
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "material_id": mid,
+                        "type": "return_in",
+                        "quantity": final_qty,
+                        "reason": reason_note,
+                        "operator": operator,
+                        "related_doc_type": "ISSUE_CANCEL",
+                        "related_doc_id": issue_id,
+                        "snapshot_stock": new_stock
+                    })
         
         # 状态回滚
         target_issue["status"] = "draft"
@@ -1505,10 +1762,56 @@ class DataManager:
         
         data["inventory_records"] = records
         data["raw_materials"] = materials
+        data["product_inventory"] = products
+        data["product_inventory_records"] = product_records
         
         if self.save_data(data):
             return True, "撤销成功，库存已恢复"
         return False, "保存失败"
+    
+    def repair_material_issues(self):
+        data = self.load_data()
+        issues = data.get("material_issues", [])
+        orders = data.get("production_orders", [])
+        versions = data.get("bom_versions", [])
+        updated = False
+        for i, issue in enumerate(issues):
+            if issue.get("status") != "draft":
+                continue
+            oid = issue.get("production_order_id")
+            order = next((o for o in orders if o.get("id") == oid), None)
+            if not order:
+                continue
+            bom_ver_id = order.get("bom_version_id")
+            bom_id = order.get("bom_id")
+            plan_qty = float(order.get("plan_qty", 0.0))
+            lines = self.explode_bom(bom_ver_id, plan_qty)
+            if not lines:
+                same_bom_versions = [v for v in versions if str(v.get("bom_id")) == str(bom_id)]
+                fallback_ver = None
+                for v in reversed(same_bom_versions):
+                    if v.get("lines"):
+                        fallback_ver = v
+                        break
+                if fallback_ver:
+                    for j, o in enumerate(orders):
+                        if o.get("id") == oid:
+                            orders[j]["bom_version_id"] = fallback_ver["id"]
+                            orders[j]["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            break
+                    data["production_orders"] = orders
+                    lines = self.explode_bom(fallback_ver["id"], plan_qty)
+            if lines:
+                for line in lines:
+                    if "item_type" not in line:
+                        line["item_type"] = "raw_material"
+                issues[i]["lines"] = lines
+                issues[i]["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                updated = True
+        if updated:
+            data["material_issues"] = issues
+            return self.save_data(data)
+        return True
         
     # 净浆实验
     def get_all_paste_experiments(self):
@@ -1733,6 +2036,322 @@ class DataManager:
         """获取产品库存流水"""
         data = self.load_data()
         return data.get("product_inventory_records", [])
+    
+    def get_admin_password(self):
+        import os
+        data = self.load_data()
+        settings = data.get("system_settings") or {}
+        salt = settings.get("admin_password_salt")
+        pwd_hash = settings.get("admin_password_hash")
+        if salt and pwd_hash:
+            return None
+        try:
+            val = os.environ.get("APP_ADMIN_PASSWORD")
+            if val:
+                return val
+        except Exception:
+            pass
+        try:
+            sec = getattr(st, "secrets", None)
+            if sec and "admin_password" in sec:
+                return sec["admin_password"]
+        except Exception:
+            pass
+        return "admin"
+    
+    def verify_admin_password(self, password: str) -> bool:
+        if not password:
+            return False
+        data = self.load_data()
+        settings = data.get("system_settings") or {}
+        salt = settings.get("admin_password_salt")
+        pwd_hash = settings.get("admin_password_hash")
+        if salt and pwd_hash:
+            calc = self._hash_password(str(password), str(salt))
+            return secrets.compare_digest(str(calc), str(pwd_hash))
+        expected = self.get_admin_password()
+        return secrets.compare_digest(str(password), str(expected))
+    
+    def set_admin_password(self, password: str):
+        data = self.load_data()
+        settings = data.get("system_settings") or {}
+        salt = secrets.token_hex(16)
+        pwd_hash = self._hash_password(str(password), str(salt))
+        settings["admin_password_salt"] = salt
+        settings["admin_password_hash"] = pwd_hash
+        data["system_settings"] = settings
+        return self.save_data(data)
+    
+    def ensure_raw_material_from_product(self, product_name, unit_target="kg"):
+        data = self.load_data()
+        inventory = data.get("product_inventory", [])
+        materials = data.get("raw_materials", [])
+        records = data.get("inventory_records", [])
+        prod = next((p for p in inventory if str(p.get("name", "")).strip() == str(product_name).strip()), None)
+        if not prod:
+            return False, f"未找到成品库存：{product_name}"
+        # 检查原材料是否已存在
+        mat = next((m for m in materials if str(m.get("name", "")).strip() == str(product_name).strip()), None)
+        if not mat:
+            new_id = max([m.get("id", 0) for m in materials], default=0) + 1
+            mat = {
+                "id": new_id,
+                "name": product_name,
+                "supplier": "",
+                "spec": "",
+                "unit": unit_target,
+                "stock_quantity": 0.0,
+                "created_date": datetime.now().strftime("%Y-%m-%d"),
+                "last_stock_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            materials.append(mat)
+        # 同步库存：将成品库存数量换算为原材料库存
+        qty_ton = float(prod.get("stock_quantity", 0.0))
+        prod_unit = prod.get("unit", "吨")
+        final_qty, success = convert_quantity(qty_ton, prod_unit, unit_target)
+        if not success and normalize_unit(prod_unit) != normalize_unit(unit_target):
+            logger.warning(f"Unit conversion failed when migrating product to raw: {qty_ton} {prod_unit} -> {unit_target}")
+            # 默认换算：吨->kg
+            if normalize_unit(prod_unit) in ["ton", "吨"] and normalize_unit(unit_target) in ["kg", "千克"]:
+                final_qty = qty_ton * 1000.0
+            else:
+                final_qty = qty_ton
+        # 更新原材料库存为换算后的值
+        for i, m in enumerate(materials):
+            if m.get("name") == product_name:
+                materials[i]["stock_quantity"] = final_qty
+                materials[i]["last_stock_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                break
+        # 生成一条台账记录以体现初始同步（adjust_in）
+        new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+        records.append({
+            "id": new_rec_id,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "material_id": mat.get("id"),
+            "type": "adjust_in",
+            "quantity": final_qty,
+            "unit": unit_target,
+            "reason": f"迁移自成品库存: {product_name}",
+            "operator": "System",
+            "snapshot_stock": final_qty
+        })
+        data["raw_materials"] = materials
+        data["inventory_records"] = records
+        self.save_data(data)
+        return True, "迁移成功"
+    
+    def cleanup_migrated_raw_materials(self, names):
+        data = self.load_data()
+        materials = data.get("raw_materials", [])
+        records = data.get("inventory_records", [])
+        name_set = set(str(n).strip() for n in names if n)
+        target_ids = [m.get("id") for m in materials if str(m.get("name", "")).strip() in name_set]
+        new_materials = [m for m in materials if str(m.get("name", "")).strip() not in name_set]
+        new_records = []
+        for r in records:
+            mid = r.get("material_id")
+            reason = str(r.get("reason", "") or "")
+            if mid in target_ids and reason.startswith("迁移自成品库存:"):
+                continue
+            new_records.append(r)
+        data["raw_materials"] = new_materials
+        data["inventory_records"] = new_records
+        self.save_data(data)
+        return True, f"已清除 {len(target_ids)} 项及相关台账"
+    
+    def audit_and_fix_product_consumption_mismatch(self):
+        data = self.load_data()
+        records = data.get("product_inventory_records", [])
+        issues = data.get("material_issues", [])
+        inventory = data.get("product_inventory", [])
+        issue_map = {}
+        for iss in issues:
+            code = iss.get("issue_code")
+            if code:
+                issue_map[code] = iss
+        def parse_issue_code(reason):
+            s = str(reason or "")
+            if "生产领料:" in s:
+                part = s.split("生产领料:", 1)[1].strip()
+                part = part.split("(", 1)[0].strip()
+                return part
+            return ""
+        def expect_norm(name):
+            n = str(name or "").strip()
+            if n.startswith("YJSNJ-") or n in ["有碱速凝剂", "碱速凝剂"]:
+                return "YJSNJ-有碱速凝剂", "有碱速凝剂"
+            if n.startswith("WJSNJ-") or n in ["无碱速凝剂"]:
+                return "WJSNJ-无碱速凝剂", "无碱速凝剂"
+            return n, ""
+        def find_item_idx(nm, tp):
+            for i, it in enumerate(inventory):
+                if str(it.get("name", "")) == nm and str(it.get("type", "")) == tp:
+                    return i
+            return -1
+        before_snapshot = { (it.get("name"), it.get("type")): float(it.get("stock_quantity", 0.0)) for it in inventory }
+        fixed = []
+        for i, r in enumerate(records):
+            if r.get("type") != "out":
+                continue
+            pname = r.get("product_name")
+            ptype = r.get("product_type", "其他")
+            reason = r.get("reason", "")
+            code = parse_issue_code(reason)
+            if not code:
+                continue
+            iss = issue_map.get(code)
+            if not iss:
+                continue
+            lines = iss.get("lines", [])
+            exp_name = ""
+            for ln in lines:
+                if ln.get("item_type") == "product":
+                    exp_name = ln.get("item_name", "")
+                    break
+            if not exp_name:
+                continue
+            exp_norm_name, exp_norm_type = expect_norm(exp_name)
+            if ptype == "无碱速凝剂" and exp_norm_type == "有碱速凝剂":
+                qty = float(r.get("quantity", 0.0))
+                old_idx = find_item_idx(pname, ptype)
+                new_idx = find_item_idx(exp_norm_name, exp_norm_type)
+                if new_idx == -1:
+                    new_id = max([p.get("id", 0) for p in inventory], default=0) + 1
+                    inventory.append({
+                        "id": new_id,
+                        "name": exp_norm_name,
+                        "type": exp_norm_type,
+                        "stock_quantity": 0.0,
+                        "unit": "吨",
+                        "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    new_idx = len(inventory) - 1
+                if old_idx >= 0:
+                    old_stock = float(inventory[old_idx].get("stock_quantity", 0.0))
+                    inventory[old_idx]["stock_quantity"] = old_stock + qty
+                    inventory[old_idx]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                new_stock = float(inventory[new_idx].get("stock_quantity", 0.0))
+                inventory[new_idx]["stock_quantity"] = new_stock - qty
+                inventory[new_idx]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                r["product_name"] = exp_norm_name
+                r["product_type"] = exp_norm_type
+                r["snapshot_stock"] = float(inventory[new_idx].get("stock_quantity", 0.0))
+                fixed.append({
+                    "record_id": r.get("id"),
+                    "issue_code": code,
+                    "old_name": pname,
+                    "old_type": ptype,
+                    "new_name": exp_norm_name,
+                    "new_type": exp_norm_type,
+                    "quantity": qty
+                })
+        data["product_inventory"] = inventory
+        data["product_inventory_records"] = records
+        self.save_data(data)
+        after_snapshot = { (it.get("name"), it.get("type")): float(it.get("stock_quantity", 0.0)) for it in inventory }
+        report_rows = []
+        for f in fixed:
+            old_key = (f["old_name"], f["old_type"])
+            new_key = (f["new_name"], f["new_type"])
+            report_rows.append({
+                "记录ID": f["record_id"],
+                "领料单号": f["issue_code"],
+                "修正数量(吨)": round(f["quantity"], 6),
+                "原产品": f["old_name"],
+                "原类型": f["old_type"],
+                "新产品": f["new_name"],
+                "新类型": f["new_type"],
+                "原产品修正后库存(吨)": round(after_snapshot.get(old_key, 0.0), 6),
+                "新产品修正后库存(吨)": round(after_snapshot.get(new_key, 0.0), 6)
+            })
+        return report_rows
+    
+    def normalize_product_aliases(self):
+        """
+        规范产品名称别名：
+        - 将有碱/无碱速凝剂的别名合并为带编码的规范名称
+        - 合并库存条目，累计库存数量
+        - 级联更新产品库存台账中的产品名称
+        Returns:
+            list[dict]: 调整摘要
+        """
+        data = self.load_data()
+        inventory = data.get("product_inventory", [])
+        records = data.get("product_inventory_records", [])
+        
+        alias_map = {
+            "YJSNJ-有碱速凝剂": ["有碱速凝剂", "碱速凝剂"],
+            "WJSNJ-无碱速凝剂": ["无碱速凝剂"]
+        }
+        
+        adjustments = []
+        
+        for canonical, aliases in alias_map.items():
+            group_names = [canonical] + aliases
+            group_items = [item for item in inventory if str(item.get("name")) in group_names]
+            if not group_items:
+                adjustments.append({
+                    "规范名称": canonical,
+                    "合并来源": ",".join(aliases),
+                    "原库存合计(吨)": 0.0,
+                    "合并后库存(吨)": 0.0,
+                    "删除条目数": 0,
+                    "更新台账记录数": 0
+                })
+                continue
+            
+            total_stock = sum(float(it.get("stock_quantity", 0.0)) for it in group_items)
+            canonical_item = next((it for it in group_items if it.get("name") == canonical), None)
+            
+            if canonical_item is None:
+                canonical_item = {
+                    "id": max([p.get("id", 0) for p in inventory], default=0) + 1,
+                    "name": canonical,
+                    "type": "有碱速凝剂" if "有碱速凝剂" in canonical else ("无碱速凝剂" if "无碱速凝剂" in canonical else group_items[0].get("type", "其他")),
+                    "stock_quantity": 0.0,
+                    "unit": group_items[0].get("unit", "吨"),
+                    "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                inventory.append(canonical_item)
+            
+            prev_total = float(canonical_item.get("stock_quantity", 0.0))
+            canonical_item["stock_quantity"] = total_stock
+            canonical_item["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            desired_type = "有碱速凝剂" if "有碱速凝剂" in canonical else "无碱速凝剂"
+            canonical_item["type"] = desired_type
+            
+            removed_count = 0
+            new_inventory = []
+            for it in inventory:
+                if it.get("name") in aliases:
+                    removed_count += 1
+                    continue
+                if it.get("name") == canonical:
+                    it["type"] = desired_type
+                new_inventory.append(it)
+            inventory = new_inventory
+            
+            updated_records = 0
+            for r in records:
+                if r.get("product_name") in group_names:
+                    r["product_name"] = canonical
+                    r["product_type"] = desired_type
+                    updated_records += 1
+            
+            adjustments.append({
+                "规范名称": canonical,
+                "合并来源": ",".join(aliases),
+                "原库存合计(吨)": round(prev_total, 4),
+                "合并后库存(吨)": round(total_stock, 4),
+                "删除条目数": removed_count,
+                "更新台账记录数": updated_records
+            })
+        
+        data["product_inventory"] = inventory
+        data["product_inventory_records"] = records
+        self.save_data(data)
+        return adjustments
 
     def delete_product_inventory_item(self, product_id):
         """删除产品库存条目"""

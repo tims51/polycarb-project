@@ -1,7 +1,9 @@
-﻿import streamlit as st
+import streamlit as st
 from datetime import datetime
 import pandas as pd
 import uuid
+import io
+from utils.unit_helper import convert_quantity, normalize_unit
 
 def render_sap_bom(data_manager):
     """渲染 SAP/BOM 管理页面"""
@@ -23,6 +25,11 @@ def render_sap_bom(data_manager):
 
 def _render_bom_management(data_manager):
     st.subheader("BOM 主数据管理")
+    
+    user = st.session_state.get("current_user")
+    if not user or user.get("role") != "admin":
+        st.info("仅管理员可以维护 BOM 主数据。")
+        return
     
     if "bom_active_id" not in st.session_state:
         st.session_state.bom_active_id = None
@@ -91,6 +98,9 @@ def _render_bom_form(data_manager, bom=None):
     with st.form("bom_base_form"):
         code = st.text_input("BOM 编号", value=bom.get("bom_code", "") if bom else "")
         name = st.text_input("BOM 名称", value=bom.get("bom_name", "") if bom else "")
+        admin_pwd = None
+        if bom:
+            admin_pwd = st.text_input("管理员口令", type="password", key=f"bom_admin_pwd_{bom['id']}")
         
         # 定义类型选项和映射
         type_options = ["母液", "成品", "速凝剂", "防冻剂"]
@@ -132,12 +142,16 @@ def _render_bom_form(data_manager, bom=None):
                     "bom_code": code,
                     "bom_name": name,
                     "bom_type": bom_type,
-                    "status": "active", # 默认激活
+                    "status": "active",
                     "production_mode": prod_mode,
                     "oem_manufacturer": oem_name if prod_mode == "代工" else ""
                 }
                 if bom:
-                    if data_manager.update_bom(bom['id'], data):
+                    if not admin_pwd:
+                        st.error("请填写管理员口令")
+                    elif not data_manager.verify_admin_password(admin_pwd):
+                        st.error("管理员口令错误")
+                    elif data_manager.update_bom(bom['id'], data):
                         st.success("更新成功")
                         st.session_state.bom_edit_mode = False
                         st.rerun()
@@ -169,16 +183,19 @@ def _render_bom_detail(data_manager, bom):
     
     with col_ops:
         if st.button("🗑️ 删除 BOM", type="primary"):
-            # 确认删除逻辑 (简单起见直接删，或者弹窗确认)
-            # Streamlit 原生没有弹窗，可以用 session_state 做二次确认
             st.session_state[f"confirm_del_bom_{bom['id']}"] = True
         
         if st.session_state.get(f"confirm_del_bom_{bom['id']}", False):
-            st.warning("确定要删除吗？这将删除所有版本。")
+            st.warning("确定要删除吗？这将删除该 BOM 及其所有版本。")
+            pwd = st.text_input("管理员口令", type="password", key=f"del_bom_pwd_{bom['id']}")
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("✅ 确认", key=f"yes_del_{bom['id']}"):
-                    if data_manager.delete_bom(bom['id']):
+                    if not pwd:
+                        st.error("请填写管理员口令")
+                    elif not data_manager.verify_admin_password(pwd):
+                        st.error("管理员口令错误")
+                    elif data_manager.delete_bom(bom['id']):
                         st.success("已删除")
                         st.session_state.bom_active_id = None
                         del st.session_state[f"confirm_del_bom_{bom['id']}"]
@@ -258,7 +275,7 @@ def _render_version_editor(data_manager, version, mat_options):
             with st.form(key=f"pwd_head_{version['id']}"):
                 pwd = st.text_input("管理员密码", type="password")
                 submitted = st.form_submit_button("开始修改")
-                if submitted and pwd == "admin":
+                if submitted and data_manager.verify_admin_password(pwd):
                     st.session_state[auth_key] = True
                     st.success("已验证")
                     st.rerun()
@@ -309,23 +326,23 @@ def _render_version_editor(data_manager, version, mat_options):
             with st.form(key=f"pwd_edit_{version['id']}"):
                 pwd = st.text_input("管理员密码", type="password")
                 submitted = st.form_submit_button("开始修改")
-                if submitted and pwd == "admin":
+                if submitted and data_manager.verify_admin_password(pwd):
                     st.session_state[auth_key] = True
                     st.success("已验证")
                     st.rerun()
                 elif submitted:
                     st.error("密码错误")
         else:
-            # 获取原材料和产品(BOM)选项
+            # 获取原材料和成品库存选项
             raw_materials = data_manager.get_all_raw_materials()
-            products = data_manager.get_all_boms()
+            product_inventory = data_manager.get_product_inventory()
             
             combined_options = {}
             for m in raw_materials:
                 label = f"[原材料] {m['name']} ({m.get('material_number', '-')})"
                 combined_options[label] = f"raw_material:{m['id']}"
-            for p in products:
-                label = f"[产品] {p['bom_name']} ({p.get('bom_code', '-')})"
+            for p in product_inventory:
+                label = f"[成品] {p['name']} ({p.get('type', '其他')})"
                 combined_options[label] = f"product:{p['id']}"
 
             with st.form(f"add_line_form_{version['id']}", clear_on_submit=True):
@@ -375,7 +392,7 @@ def _render_version_editor(data_manager, version, mat_options):
                 with st.form(key=f"pwd_force_save_{version['id']}"):
                     pwd = st.text_input("管理员密码", type="password")
                     submitted = st.form_submit_button("强制保存")
-                    if submitted and pwd == "admin":
+                    if submitted and data_manager.verify_admin_password(pwd):
                         data_manager.update_bom_version(version['id'], {
                             "effective_from": eff_from.strftime("%Y-%m-%d"),
                             "yield_base": yield_base,
@@ -401,6 +418,11 @@ def _render_version_editor(data_manager, version, mat_options):
 def _render_production_management(data_manager):
     st.subheader("生产订单管理")
     
+    user = st.session_state.get("current_user")
+    if not user:
+        st.info("请登录后查看生产订单。")
+        return
+    
     if "prod_view" not in st.session_state:
         st.session_state.prod_view = "list" # list, create, detail
     if "active_order_id" not in st.session_state:
@@ -425,13 +447,187 @@ def _render_production_management(data_manager):
             # 简单表格 (按创建时间倒序)
             orders.sort(key=lambda x: x.get('created_at', ''), reverse=True)
             
-            # 格式化显示
-            df_orders = pd.DataFrame(orders)[["id", "order_code", "status", "plan_qty", "created_at"]]
-            df_orders.columns = ["ID", "生产单号", "状态", "计划产量 (kg)", "创建时间"]
-            st.dataframe(
-                df_orders,
-                use_container_width=True
-            )
+            boms = data_manager.get_all_boms()
+            bom_map = {}
+            for b in boms:
+                code = str(b.get('bom_code', '')).strip()
+                name = str(b.get('bom_name', '')).strip()
+                bom_map[b.get('id')] = f"{code}-{name}" if code else name
+            display_rows = []
+            for o in orders:
+                pname = bom_map.get(o.get('bom_id'), "")
+                display_rows.append({
+                    "产品名称": pname,
+                    "生产单号": o.get("order_code", ""),
+                    "状态": o.get("status", ""),
+                    "计划产量 (kg)": o.get("plan_qty", 0),
+                    "创建时间": o.get("created_at", "")
+                })
+            df_orders = pd.DataFrame(display_rows)
+            st.dataframe(df_orders, use_container_width=True)
+            csv_orders = df_orders.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button("导出CSV", csv_orders, file_name="生产单列表.csv", mime="text/csv")
+            out_orders = io.BytesIO()
+            try:
+                with pd.ExcelWriter(out_orders, engine='xlsxwriter') as writer:
+                    df_orders.to_excel(writer, index=False, sheet_name='生产单列表')
+                    wb = writer.book
+                    ws = writer.sheets['生产单列表']
+                    fmt = wb.add_format({'bold': True})
+                    for i, col in enumerate(df_orders.columns):
+                        ws.write(0, i, col, fmt)
+            except:
+                with pd.ExcelWriter(out_orders) as writer:
+                    df_orders.to_excel(writer, index=False, sheet_name='生产单列表')
+            st.download_button("导出Excel", out_orders.getvalue(), file_name="生产单列表.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.divider()
+            st.markdown("#### 生产计划报表")
+            plan_batch_kg = 10000.0
+            raw_materials = data_manager.get_all_raw_materials()
+            mat_inv = {}
+            for m in raw_materials:
+                qty = float(m.get("stock_quantity", 0.0))
+                unit = m.get("unit", "kg")
+                base_qty, ok = convert_quantity(qty, unit, "kg")
+                mat_inv[m["id"]] = base_qty if ok else qty
+            target_types = ["母液", "速凝剂"]
+            type_boms = [b for b in boms if b.get("bom_type") in target_types]
+            versions = data_manager.get_bom_versions(0)
+            all_versions = data_manager.load_data().get("bom_versions", [])
+            def latest_valid_version(bid):
+                vs = [v for v in all_versions if v.get("bom_id") == bid]
+                for v in reversed(vs):
+                    if v.get("lines"):
+                        return v
+                return None
+            def per_batch_require(v):
+                base = float(v.get("yield_base", 1000.0) or 1000.0)
+                if base <= 0:
+                    base = 1000.0
+                ratio = plan_batch_kg / base
+                req = {}
+                for line in v.get("lines", []):
+                    if line.get("item_type", "raw_material") == "raw_material":
+                        mid = line.get("item_id")
+                        lqty = float(line.get("qty", 0.0))
+                        luom = line.get("uom", "kg")
+                        need = lqty * ratio
+                        need_kg, ok = convert_quantity(need, luom, "kg")
+                        req[mid] = req.get(mid, 0.0) + (need_kg if ok else need)
+                return req
+            def scarcity_score(req):
+                s = 0.0
+                for mid, q in req.items():
+                    avail = mat_inv.get(mid, 0.0)
+                    w = 1.0 / (avail if avail > 0 else 1e-9)
+                    s += q * w
+                return s
+            candidates = []
+            for b in type_boms:
+                v = latest_valid_version(b["id"])
+                if not v:
+                    continue
+                req = per_batch_require(v)
+                if not req:
+                    continue
+                score = scarcity_score(req)
+                batches = min([int((mat_inv.get(mid, 0.0)) // q) if q > 0 else 0 for mid, q in req.items()]) if req else 0
+                candidates.append({
+                    "bom_id": b["id"],
+                    "bom_label": bom_map.get(b["id"]),
+                    "bom_type": b.get("bom_type"),
+                    "version_id": v["id"],
+                    "per_batch_require": req,
+                    "scarcity_score": score,
+                    "max_batches_possible": batches
+                })
+            by_type = {}
+            for c in candidates:
+                t = c["bom_type"]
+                if t not in by_type or c["scarcity_score"] < by_type[t]["scarcity_score"]:
+                    by_type[t] = c
+            report_rows = []
+            for t, sel in by_type.items():
+                total_req = sum(sel["per_batch_require"].values())
+                report_rows.append({
+                    "产品类型": t,
+                    "选用配方": sel["bom_label"],
+                    "可生产批次": sel["max_batches_possible"],
+                    "每批次原材料合计(kg)": round(total_req, 4)
+                })
+            if report_rows:
+                st.dataframe(pd.DataFrame(report_rows), use_container_width=True)
+                csv_plan = pd.DataFrame(report_rows).to_csv(index=False, encoding="utf-8-sig")
+                st.download_button("导出CSV", csv_plan, file_name="生产计划报表.csv", mime="text/csv")
+                out_plan = io.BytesIO()
+                df_plan = pd.DataFrame(report_rows)
+                try:
+                    with pd.ExcelWriter(out_plan, engine='xlsxwriter') as writer:
+                        df_plan.to_excel(writer, index=False, sheet_name='生产计划报表')
+                        wb = writer.book
+                        ws = writer.sheets['生产计划报表']
+                        fmt = wb.add_format({'bold': True})
+                        for i, col in enumerate(df_plan.columns):
+                            ws.write(0, i, col, fmt)
+                except:
+                    with pd.ExcelWriter(out_plan) as writer:
+                        df_plan.to_excel(writer, index=False, sheet_name='生产计划报表')
+                st.download_button("导出Excel", out_plan.getvalue(), file_name="生产计划报表.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.markdown("##### 原材料消耗与预警")
+                warn_rows = []
+                for m in raw_materials:
+                    mid = m["id"]
+                    name = m["name"]
+                    avail = mat_inv.get(mid, 0.0)
+                    need_30 = 0.0
+                    for t, sel in by_type.items():
+                        q = sel["per_batch_require"].get(mid, 0.0)
+                        need_30 += q * 3
+                    est_batches = 0
+                    if need_30 > 0:
+                        est_batches = round(avail / (need_30 / 3.0), 4)
+                    warn = avail < need_30 and need_30 > 0
+                    warn_rows.append({
+                        "原材料名称": name,
+                        "当前库存(kg)": round(avail, 4),
+                        "预计剩余生产批次": est_batches,
+                        "预警": "是" if warn else "否"
+                    })
+                df_warn = pd.DataFrame(warn_rows)
+                def _hl(row):
+                    return ['background-color: #ffecec; color: #c1121f' if row['预警'] == '是' else '' for _ in row]
+                st.dataframe(df_warn.style.apply(_hl, axis=1), use_container_width=True)
+                csv_warn = df_warn.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button("导出CSV", csv_warn, file_name="原材料预警.csv", mime="text/csv")
+                out_warn = io.BytesIO()
+                try:
+                    with pd.ExcelWriter(out_warn, engine='xlsxwriter') as writer:
+                        df_warn.to_excel(writer, index=False, sheet_name='原材料预警')
+                        wb = writer.book
+                        ws = writer.sheets['原材料预警']
+                        fmt = wb.add_format({'bold': True})
+                        for i, col in enumerate(df_warn.columns):
+                            ws.write(0, i, col, fmt)
+                except:
+                    with pd.ExcelWriter(out_warn) as writer:
+                        df_warn.to_excel(writer, index=False, sheet_name='原材料预警')
+                st.download_button("导出Excel", out_warn.getvalue(), file_name="原材料预警.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                col_exec1, col_exec2 = st.columns(2)
+                with col_exec1:
+                    if st.button("创建10吨生产单"):
+                        for t, sel in by_type.items():
+                            new_order = {
+                                "order_code": f"PROD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}",
+                                "bom_id": sel["bom_id"],
+                                "bom_version_id": sel["version_id"],
+                                "plan_qty": plan_batch_kg,
+                                "status": "draft",
+                                "production_mode": "自产",
+                                "oem_manufacturer": ""
+                            }
+                            data_manager.add_production_order(new_order)
+                        st.success("已创建生产单")
+                        st.rerun()
             
             # 选择操作
             c_sel, c_btn = st.columns([3, 1])
@@ -455,7 +651,14 @@ def _render_production_management(data_manager):
         with st.form("new_order_form"):
             # 选择 BOM
             boms = data_manager.get_all_boms()
-            bom_opts = {f"{b['bom_code']} {b['bom_name']}": b for b in boms}
+            # 2026-01-13 Update: 统一使用 {bom_code}-{bom_name} 格式
+            bom_opts = {}
+            for b in boms:
+                code = b.get('bom_code', '').strip()
+                name = b['bom_name'].strip()
+                label = f"{code}-{name}" if code else name
+                bom_opts[label] = b
+            
             sel_bom_label = st.selectbox("选择产品 BOM", list(bom_opts.keys()))
             
             plan_qty = st.number_input("计划产量 (kg)", min_value=0.0, step=100.0, value=1000.0)
@@ -475,8 +678,15 @@ def _render_production_management(data_manager):
                     if not vers:
                         st.error("该 BOM 没有版本，无法创建")
                     else:
-                        # 默认选最后一个版本
-                        target_ver = vers[-1]
+                        # 选择最新且有明细的版本（倒序查找）
+                        target_ver = None
+                        for v in reversed(vers):
+                            if v.get("lines"):
+                                target_ver = v
+                                break
+                        if not target_ver:
+                            st.error("该 BOM 的所有版本均无明细，请先维护版本行项目")
+                            st.stop()
                         
                         new_order = {
                             "order_code": f"PROD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}",
@@ -634,10 +844,11 @@ def _render_shipping_management(data_manager):
             with col1:
                 # 构造选项: "名称 (库存: 100 吨)"
                 prod_options = {f"{p['name']} ({p.get('type', '-')}) - 库存: {float(p.get('stock_quantity', 0)):.2f} {p.get('unit', '吨')}": p for p in inventory}
-                sel_label = st.selectbox("选择发货产品", list(prod_options.keys()))
+                labels = [""] + list(prod_options.keys())
+                sel_label = st.selectbox("选择发货产品", labels, index=0)
                 
             with col2:
-                ship_qty = st.number_input("发货数量 (吨)", min_value=0.01, step=0.1)
+                ship_qty_text = st.text_input("发货数量 (吨)", value="")
             
             col3, col4 = st.columns(2)
             with col3:
@@ -650,9 +861,21 @@ def _render_shipping_management(data_manager):
             submitted = st.form_submit_button("确认发货", type="primary")
             
             if submitted:
-                if not customer:
+                if not sel_label:
+                    st.error("请选择发货产品")
+                elif not ship_qty_text.strip():
+                    st.error("请输入发货数量")
+                elif not customer:
                     st.error("请填写客户名称")
                 else:
+                    try:
+                        ship_qty = float(ship_qty_text.strip())
+                    except:
+                        st.error("发货数量格式错误")
+                        st.stop()
+                    if ship_qty <= 0:
+                        st.error("发货数量必须大于0")
+                        st.stop()
                     selected_prod = prod_options[sel_label]
                     current_stock = float(selected_prod.get('stock_quantity', 0))
                     
@@ -683,10 +906,7 @@ def _render_shipping_management(data_manager):
     st.markdown("#### 📜 近期发货记录")
     
     records = data_manager.get_product_inventory_records()
-    # 筛选出 type='out' 且 reason 包含 '发货' 的记录 (简单筛选)
-    # 或者所有 out 记录? 用户可能也想看其他出库。
-    # 这里我们筛选 type='out'
-    shipping_records = [r for r in records if r.get('type') == 'out']
+    shipping_records = [r for r in records if r.get('related_doc_type') == 'SHIPPING']
     
     if shipping_records:
         # 按时间倒序
@@ -705,13 +925,28 @@ def _render_shipping_management(data_manager):
                               .replace("snapshot_stock", "发货后结存") for c in df_display.columns]
         
         st.dataframe(df_display, use_container_width=True)
+        csv_ship = df_display.to_csv(index=False, encoding="utf-8-sig")
+        st.download_button("导出CSV", csv_ship, file_name="发货记录.csv", mime="text/csv")
+        out_ship = io.BytesIO()
+        try:
+            with pd.ExcelWriter(out_ship, engine='xlsxwriter') as writer:
+                df_display.to_excel(writer, index=False, sheet_name='发货记录')
+                wb = writer.book
+                ws = writer.sheets['发货记录']
+                fmt = wb.add_format({'bold': True})
+                for i, col in enumerate(df_display.columns):
+                    ws.write(0, i, col, fmt)
+        except:
+            with pd.ExcelWriter(out_ship) as writer:
+                df_display.to_excel(writer, index=False, sheet_name='发货记录')
+        st.download_button("导出Excel", out_ship.getvalue(), file_name="发货记录.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.info("暂无发货记录")
 
 def _render_inventory_reports(data_manager):
     st.subheader("库存台账报表")
     
-    tab_bal, tab_ledger = st.tabs(["💰 库存余额", "📝 台账流水"])
+    tab_bal, tab_ledger, tab_prodcons, tab_stats = st.tabs(["💰 库存余额", "📝 台账流水", "📉 成品消耗", "📊 综合统计"])
     
     with tab_bal:
         # 修改逻辑：不再使用 get_stock_balance (纯流水计算)，
@@ -753,7 +988,23 @@ def _render_inventory_reports(data_manager):
             })
         
         if report_data:
-            st.dataframe(pd.DataFrame(report_data), use_container_width=True)
+            df_bal = pd.DataFrame(report_data)
+            st.dataframe(df_bal, use_container_width=True)
+            csv_bal = df_bal.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button("导出CSV", csv_bal, file_name="库存余额.csv", mime="text/csv")
+            out_bal = io.BytesIO()
+            try:
+                with pd.ExcelWriter(out_bal, engine='xlsxwriter') as writer:
+                    df_bal.to_excel(writer, index=False, sheet_name='库存余额')
+                    wb = writer.book
+                    ws = writer.sheets['库存余额']
+                    fmt = wb.add_format({'bold': True})
+                    for i, col in enumerate(df_bal.columns):
+                        ws.write(0, i, col, fmt)
+            except:
+                with pd.ExcelWriter(out_bal) as writer:
+                    df_bal.to_excel(writer, index=False, sheet_name='库存余额')
+            st.download_button("导出Excel", out_bal.getvalue(), file_name="库存余额.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         else:
             st.info("暂无库存数据")
             
@@ -837,9 +1088,256 @@ def _render_inventory_reports(data_manager):
                 use_container_width=True,
                 hide_index=True
             )
+            csv_ledger = df_display.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button("导出CSV", csv_ledger, file_name="台账流水.csv", mime="text/csv")
+            out_ledger = io.BytesIO()
+            try:
+                with pd.ExcelWriter(out_ledger, engine='xlsxwriter') as writer:
+                    df_display.to_excel(writer, index=False, sheet_name='台账流水')
+                    wb = writer.book
+                    ws = writer.sheets['台账流水']
+                    fmt = wb.add_format({'bold': True})
+                    for i, col in enumerate(df_display.columns):
+                        ws.write(0, i, col, fmt)
+            except:
+                with pd.ExcelWriter(out_ledger) as writer:
+                    df_display.to_excel(writer, index=False, sheet_name='台账流水')
+            st.download_button("导出Excel", out_ledger.getvalue(), file_name="台账流水.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         else:
             st.info("暂无台账记录")
 
+    with tab_prodcons:
+        prod_records = data_manager.get_product_inventory_records()
+        cons_records = [r for r in prod_records if r.get('type') == 'out' and r.get('related_doc_type') != 'SHIPPING']
+        if cons_records:
+            display_rows = []
+            for r in cons_records:
+                reason = str(r.get("reason", "") or "")
+                rdt = r.get("related_doc_type")
+                src_type = ""
+                doc_no = ""
+                if rdt:
+                    if rdt == "ISSUE":
+                        src_type = "生产领料"
+                    elif rdt == "SHIPPING":
+                        src_type = "发货"
+                    else:
+                        src_type = rdt
+                else:
+                    if "生产领料" in reason:
+                        src_type = "生产领料"
+                        try:
+                            part = reason.split("生产领料: ", 1)[1]
+                            doc_no = part.split(" ", 1)[0].split("(", 1)[0]
+                        except:
+                            doc_no = ""
+                    else:
+                        src_type = "其他"
+                if not doc_no and "生产领料" in reason:
+                    try:
+                        part = reason.split("生产领料: ", 1)[1]
+                        doc_no = part.split(" ", 1)[0].split("(", 1)[0]
+                    except:
+                        doc_no = ""
+                display_rows.append({
+                    "日期": r.get("date", ""),
+                    "产品名称": r.get("product_name", ""),
+                    "类型": r.get("product_type", ""),
+                    "数量(吨)": r.get("quantity", 0),
+                    "来源类型": src_type,
+                    "关联单据号": doc_no,
+                    "来源/备注": reason,
+                    "操作人": r.get("operator", ""),
+                    "发出后结存": r.get("snapshot_stock", 0)
+                })
+            df_cons = pd.DataFrame(display_rows)
+            st.dataframe(df_cons, use_container_width=True)
+            csv_cons = df_cons.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button("导出CSV", csv_cons, file_name="成品消耗.csv", mime="text/csv")
+            out_cons = io.BytesIO()
+            try:
+                with pd.ExcelWriter(out_cons, engine='xlsxwriter') as writer:
+                    df_cons.to_excel(writer, index=False, sheet_name='成品消耗')
+                    wb = writer.book
+                    ws = writer.sheets['成品消耗']
+                    fmt = wb.add_format({'bold': True})
+                    for i, col in enumerate(df_cons.columns):
+                        ws.write(0, i, col, fmt)
+            except:
+                with pd.ExcelWriter(out_cons) as writer:
+                    df_cons.to_excel(writer, index=False, sheet_name='成品消耗')
+            st.download_button("导出Excel", out_cons.getvalue(), file_name="成品消耗.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        else:
+            st.info("暂无成品消耗记录")
+
+    with tab_stats:
+        gran = st.selectbox("统计周期", ["周", "月", "年度"], index=1)
+        mats = data_manager.get_inventory_records()
+        prods = data_manager.get_product_inventory_records()
+        def parse_dt(x, fallback=None):
+            if not x and fallback:
+                x = fallback
+            try:
+                return pd.to_datetime(x)
+            except:
+                return pd.NaT
+        def period_str(dt):
+            if pd.isna(dt):
+                return ""
+            if gran == "周":
+                iso = dt.isocalendar()
+                return f"{iso.year}-W{int(iso.week):02d}"
+            if gran == "月":
+                return dt.strftime("%Y-%m")
+            return dt.strftime("%Y")
+        df_m = pd.DataFrame(mats)
+        if not df_m.empty:
+            if "created_at" in df_m.columns:
+                df_m["_dt"] = df_m["created_at"].apply(lambda x: parse_dt(x))
+            else:
+                df_m["_dt"] = df_m["date"].apply(lambda x: parse_dt(x))
+            df_m["period"] = df_m["_dt"].apply(period_str)
+            df_m_cons = df_m[df_m.get("type").isin(["consume_out"])].copy()
+            mat_agg = df_m_cons.groupby("period")["quantity"].sum().reset_index()
+        else:
+            mat_agg = pd.DataFrame(columns=["period", "quantity"])
+        df_p = pd.DataFrame(prods)
+        if not df_p.empty:
+            if "created_at" in df_p.columns:
+                df_p["_dt"] = df_p["created_at"].apply(lambda x: parse_dt(x))
+            else:
+                df_p["_dt"] = df_p["date"].apply(lambda x: parse_dt(x))
+            df_p["period"] = df_p["_dt"].apply(period_str)
+            df_p_prod = df_p[df_p.get("type").isin(["in"])].copy()
+            df_p_ship = df_p[(df_p.get("type").isin(["out"])) & (df_p.get("related_doc_type") == "SHIPPING")].copy()
+            prod_agg = df_p_prod.groupby("period")["quantity"].sum().reset_index()
+            ship_agg = df_p_ship.groupby("period")["quantity"].sum().reset_index()
+        else:
+            prod_agg = pd.DataFrame(columns=["period", "quantity"])
+            ship_agg = pd.DataFrame(columns=["period", "quantity"])
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.caption("原材料消耗 (kg)")
+            if not mat_agg.empty:
+                st.bar_chart(mat_agg.set_index("period"))
+                mat_exp = mat_agg.rename(columns={"period": "周期", "quantity": "数量(kg)"})
+                csv_mat = mat_exp.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button("导出CSV", csv_mat, file_name=f"原材料消耗_{gran}.csv", mime="text/csv")
+                out_mat = io.BytesIO()
+                try:
+                    with pd.ExcelWriter(out_mat, engine='xlsxwriter') as writer:
+                        mat_exp.to_excel(writer, index=False, sheet_name='原材料消耗')
+                        wb = writer.book
+                        ws = writer.sheets['原材料消耗']
+                        fmt = wb.add_format({'bold': True})
+                        for i, col in enumerate(mat_exp.columns):
+                            ws.write(0, i, col, fmt)
+                except:
+                    with pd.ExcelWriter(out_mat) as writer:
+                        mat_exp.to_excel(writer, index=False, sheet_name='原材料消耗')
+                st.download_button("导出Excel", out_mat.getvalue(), file_name=f"原材料消耗_{gran}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                materials = data_manager.get_all_raw_materials()
+                mat_map = {m['id']: m['name'] for m in materials}
+                df_m_cons["_name"] = df_m_cons["material_id"].map(mat_map)
+                if "unit" in df_m_cons.columns:
+                    df_m_cons["qty_kg"] = df_m_cons.apply(lambda x: convert_quantity(float(x["quantity"]), x["unit"], "kg")[0] if pd.notna(x["unit"]) else float(x["quantity"]), axis=1)
+                else:
+                    df_m_cons["qty_kg"] = df_m_cons["quantity"].astype(float)
+                mat_by_type = df_m_cons.groupby(["period", "_name"])["qty_kg"].sum().reset_index().rename(columns={"_name": "原材料名称"})
+                mat_pivot = mat_by_type.pivot(index="原材料名称", columns="period", values="qty_kg").fillna(0.0)
+                st.dataframe(mat_pivot.reset_index(), use_container_width=True)
+                csv_mat_type = mat_pivot.reset_index().to_csv(index=False, encoding="utf-8-sig")
+                st.download_button("导出CSV(按种类)", csv_mat_type, file_name=f"原材料消耗_按种类_{gran}.csv", mime="text/csv")
+                out_mat_type = io.BytesIO()
+                try:
+                    with pd.ExcelWriter(out_mat_type, engine='xlsxwriter') as writer:
+                        mat_pivot.reset_index().to_excel(writer, index=False, sheet_name='原材料消耗_按种类')
+                        wb = writer.book
+                        ws = writer.sheets['原材料消耗_按种类']
+                        fmt = wb.add_format({'bold': True})
+                        for i, col in enumerate(mat_pivot.reset_index().columns):
+                            ws.write(0, i, col, fmt)
+                except:
+                    with pd.ExcelWriter(out_mat_type) as writer:
+                        mat_pivot.reset_index().to_excel(writer, index=False, sheet_name='原材料消耗_按种类')
+                st.download_button("导出Excel(按种类)", out_mat_type.getvalue(), file_name=f"原材料消耗_按种类_{gran}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            else:
+                st.info("暂无数据")
+        with col2:
+            st.caption("生产产出 (吨)")
+            if not prod_agg.empty:
+                st.bar_chart(prod_agg.set_index("period"))
+                prod_exp = prod_agg.rename(columns={"period": "周期", "quantity": "数量(吨)"})
+                csv_prod = prod_exp.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button("导出CSV", csv_prod, file_name=f"生产产出_{gran}.csv", mime="text/csv")
+                out_prod = io.BytesIO()
+                try:
+                    with pd.ExcelWriter(out_prod, engine='xlsxwriter') as writer:
+                        prod_exp.to_excel(writer, index=False, sheet_name='生产产出')
+                        wb = writer.book
+                        ws = writer.sheets['生产产出']
+                        fmt = wb.add_format({'bold': True})
+                        for i, col in enumerate(prod_exp.columns):
+                            ws.write(0, i, col, fmt)
+                except:
+                    with pd.ExcelWriter(out_prod) as writer:
+                        prod_exp.to_excel(writer, index=False, sheet_name='生产产出')
+                st.download_button("导出Excel", out_prod.getvalue(), file_name=f"生产产出_{gran}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            else:
+                st.info("暂无数据")
+        with col3:
+            st.caption("发货出库 (吨)")
+            if not ship_agg.empty:
+                st.bar_chart(ship_agg.set_index("period"))
+                ship_exp = ship_agg.rename(columns={"period": "周期", "quantity": "数量(吨)"})
+                csv_shipagg = ship_exp.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button("导出CSV", csv_shipagg, file_name=f"发货出库_{gran}.csv", mime="text/csv")
+                out_shipagg = io.BytesIO()
+                try:
+                    with pd.ExcelWriter(out_shipagg, engine='xlsxwriter') as writer:
+                        ship_exp.to_excel(writer, index=False, sheet_name='发货出库')
+                        wb = writer.book
+                        ws = writer.sheets['发货出库']
+                        fmt = wb.add_format({'bold': True})
+                        for i, col in enumerate(ship_exp.columns):
+                            ws.write(0, i, col, fmt)
+                except:
+                    with pd.ExcelWriter(out_shipagg) as writer:
+                        ship_exp.to_excel(writer, index=False, sheet_name='发货出库')
+                st.download_button("导出Excel", out_shipagg.getvalue(), file_name=f"发货出库_{gran}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            else:
+                st.info("暂无数据")
+        total_mat = float(mat_agg["quantity"].sum()) if not mat_agg.empty else 0.0
+        total_prod = float(prod_agg["quantity"].sum()) if not prod_agg.empty else 0.0
+        total_ship = float(ship_agg["quantity"].sum()) if not ship_agg.empty else 0.0
+        st.markdown(f"**摘要**：原料 {total_mat:.4f} kg | 生产 {total_prod:.4f} 吨 | 发货 {total_ship:.4f} 吨")
+        if not mat_agg.empty and not prod_agg.empty and not ship_agg.empty:
+            all_out = io.BytesIO()
+            try:
+                with pd.ExcelWriter(all_out, engine='xlsxwriter') as writer:
+                    mat_exp.to_excel(writer, index=False, sheet_name=f'原材料消耗_{gran}')
+                    try:
+                        mat_pivot.reset_index().to_excel(writer, index=False, sheet_name=f'原材料消耗_按种类_{gran}')
+                    except:
+                        pass
+                    prod_exp.to_excel(writer, index=False, sheet_name=f'生产产出_{gran}')
+                    ship_exp.to_excel(writer, index=False, sheet_name=f'发货出库_{gran}')
+                    pd.DataFrame([{"指标": "原料(kg)", "总量": f"{total_mat:.4f}"},
+                                  {"指标": "生产(吨)", "总量": f"{total_prod:.4f}"},
+                                  {"指标": "发货(吨)", "总量": f"{total_ship:.4f}"}]).to_excel(writer, index=False, sheet_name='摘要')
+            except:
+                with pd.ExcelWriter(all_out) as writer:
+                    mat_exp.to_excel(writer, index=False, sheet_name=f'原材料消耗_{gran}')
+                    try:
+                        mat_pivot.reset_index().to_excel(writer, index=False, sheet_name=f'原材料消耗_按种类_{gran}')
+                    except:
+                        pass
+                    prod_exp.to_excel(writer, index=False, sheet_name=f'生产产出_{gran}')
+                    ship_exp.to_excel(writer, index=False, sheet_name=f'发货出库_{gran}')
+                    pd.DataFrame([{"指标": "原料(kg)", "总量": f"{total_mat:.4f}"},
+                                  {"指标": "生产(吨)", "总量": f"{total_prod:.4f}"},
+                                  {"指标": "发货(吨)", "总量": f"{total_ship:.4f}"}]).to_excel(writer, index=False, sheet_name='摘要')
+            st.download_button("导出整合Excel", all_out.getvalue(), file_name=f"综合统计_{gran}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 def _render_bom_tree_recursive(data_manager, bom_id, level=0, visited=None):
     """递归渲染 BOM 结构树"""
     if visited is None: visited = set()

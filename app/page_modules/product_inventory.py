@@ -6,8 +6,30 @@ import uuid
 def render_product_inventory_page(data_manager):
     st.title("📦 成品库存管理")
     
-    # 1. 顶部统计卡片
+    user = st.session_state.get("current_user")
+    if not user:
+        st.info("请登录后查看成品库存。")
+        return
+    
+    # 1. 顶部统计卡片（移除别名自动合并提示与摘要展示）
+    
     inventory = data_manager.get_product_inventory()
+    normalized_inventory = []
+    for item in inventory:
+        t = item.get("type")
+        n = str(item.get("name", ""))
+        if t == "速凝剂":
+            if n.startswith("YJSNJ-"):
+                new_item = dict(item)
+                new_item["type"] = "有碱速凝剂"
+                normalized_inventory.append(new_item)
+                continue
+            if n.startswith("WJSNJ-"):
+                new_item = dict(item)
+                new_item["type"] = "无碱速凝剂"
+                normalized_inventory.append(new_item)
+                continue
+        normalized_inventory.append(item)
     
     # --- 安全库存预警检测 ---
     alerts = []
@@ -31,7 +53,7 @@ def render_product_inventory_page(data_manager):
     
     cols = st.columns(len(categories))
     for idx, cat in enumerate(categories):
-        total = sum(item['stock_quantity'] for item in inventory if item.get('type') == cat)
+        total = sum(item['stock_quantity'] for item in normalized_inventory if item.get('type') == cat)
         with cols[idx]:
             st.metric(f"{cat}库存", f"{total:.2f} 吨")
             
@@ -162,11 +184,11 @@ def render_product_inventory_page(data_manager):
     # 3. 库存报表
     st.subheader("📊 库存明细表 (可编辑)")
     
-    if not inventory:
+    if not normalized_inventory:
         st.info("暂无库存数据")
     else:
         # 转换为 DataFrame
-        df = pd.DataFrame(inventory)
+        df = pd.DataFrame(normalized_inventory)
         
         # 确保列存在
         for col in ["min_stock", "max_stock", "unit", "last_update"]:
@@ -202,7 +224,7 @@ def render_product_inventory_page(data_manager):
                 admin_pwd = st.text_input("管理员密码", type="password", key="inv_edit_pwd", label_visibility="collapsed", placeholder="请输入密码")
             with pwd_col2:
                 if st.button("🔓 解锁编辑", key="btn_unlock_inv"):
-                    if admin_pwd == "admin": # 简单硬编码密码，实际应从配置读取
+                    if data_manager.verify_admin_password(admin_pwd):
                         st.session_state.inventory_edit_auth = True
                         st.rerun()
                     else:

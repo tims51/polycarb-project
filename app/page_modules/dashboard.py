@@ -6,6 +6,10 @@ import time
 
 def render_dashboard(data_manager):
     """渲染项目概览页面"""
+    user = st.session_state.get("current_user")
+    if not user:
+        st.info("请登录后查看项目概览。")
+        return
     st.header("📊 项目概览")
     
     # 获取数据
