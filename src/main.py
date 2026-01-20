@@ -6,6 +6,7 @@ import time
 
 # 导入核心模块
 from core.data_manager import DataManager
+from services.bom_service import BOMService
 
 # 导入页面模块
 from page_modules.dashboard import render_dashboard
@@ -24,6 +25,14 @@ from components.sidebar import render_sidebar
 
 data_manager = DataManager()
 data_manager.ensure_default_admin()
+
+# -------------------- Service Initialization (Simple DI) --------------------
+if 'services' not in st.session_state:
+    st.session_state.services = {}
+
+# Initialize services if not present
+if 'bom_service' not in st.session_state.services:
+    st.session_state.services['bom_service'] = BOMService(data_manager)
 
 # -------------------- 页面配置 --------------------
 st.set_page_config(

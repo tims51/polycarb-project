@@ -1,191 +1,142 @@
 
-import os
 import subprocess
-import sys
 import time
-import threading
 import re
-import webbrowser
-import urllib.request
-import shutil
+import os
+import sys
+import threading
+import signal
+from pathlib import Path
 
-# 定义存储公共 URL 的临时文件路径
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-URL_FILE = os.path.join(ROOT_DIR, ".public_url")
-CLOUDFLARED_PATH = os.path.join(ROOT_DIR, "cloudflared.exe")
+# Add src to python path to import config
+sys.path.append(str(Path(__file__).parent.parent / "src"))
+try:
+    from config import URL_FILE_PATH
+except ImportError:
+    URL_FILE_PATH = "public_url.txt"
 
-def cleanup_url_file():
-    """清理 URL 文件"""
-    if os.path.exists(URL_FILE):
-        try:
-            os.remove(URL_FILE)
-        except:
-            pass
-
-def download_cloudflared():
-    """
-    下载 Cloudflared (如果不存在)
-    """
-    if os.path.exists(CLOUDFLARED_PATH):
-        return True
-        
-    print("正在初始化网络组件 (Cloudflared)...")
-    print("首次运行需要下载必要组件 (约 15MB)，请稍候...")
-    
-    # 尝试下载 32 位版本 (兼容性更好)
-    url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-386.exe"
-    try:
-        # 使用 urllib 下载，伪装 User-Agent
-        req = urllib.request.Request(
-            url,
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-        )
-        with urllib.request.urlopen(req) as response, open(CLOUDFLARED_PATH, 'wb') as out_file:
-            shutil.copyfileobj(response, out_file)
-            
-        print("组件下载完成，正在验证...")
-        
-        # 验证文件是否可执行
-        try:
-            subprocess.run([CLOUDFLARED_PATH, "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            print("组件验证通过！")
-            return True
-        except Exception as e:
-            print(f"❌ 组件验证失败: {e}")
-            print("下载的文件可能已损坏或不兼容。")
-            if os.path.exists(CLOUDFLARED_PATH):
-                os.remove(CLOUDFLARED_PATH)
-            return False
-            
-    except Exception as e:
-        print(f"\n❌ 组件下载失败: {e}")
-        print("请检查网络连接。")
-        return False
-
-def read_stream(stream, callback):
-    """读取流并回调"""
-    while True:
-        line = stream.readline()
-        if not line:
-            break
-        callback(line)
-
-def start_cloudflared_tunnel():
-    """
-    启动 Cloudflared Quick Tunnel
-    """
-    if not download_cloudflared():
-        return None, None
-        
-    print("正在连接 Cloudflare 全球加速网络...")
-    
-    # 启动 cloudflared
-    cmd = [CLOUDFLARED_PATH, "tunnel", "--url", "http://localhost:8501"]
-    
+def start_streamlit():
+    """Start Streamlit server in the background."""
+    print("🚀 Starting Streamlit server...")
+    # Use Popen to run in background
     process = subprocess.Popen(
-        cmd,
+        ["streamlit", "run", "src/main.py", "--server.headless", "true"],
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        cwd=Path(__file__).parent.parent # Run from project root
     )
-    
-    url_found_event = threading.Event()
-    found_url = [None]
-    
-    def output_handler(line):
-        # Cloudflared 输出通常在 stderr，但我们合并了流
-        # print(f"[Cloudflare] {line.strip()}") # 调试用
-        
-        # 查找 trycloudflare.com URL
-        if ".trycloudflare.com" in line:
-            match = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
-            if match:
-                url = match.group(0)
-                if not found_url[0]:
-                    found_url[0] = url
-                    url_found_event.set()
-                    
-                    # 写入文件供 Streamlit 读取
-                    try:
-                        with open(URL_FILE, "w") as f:
-                            f.write(url)
-                    except Exception as e:
-                        print(f"写入 URL 文件失败: {e}")
+    return process
 
-    # 启动后台线程读取输出
-    t = threading.Thread(target=read_stream, args=(process.stdout, output_handler), daemon=True)
-    t.start()
-    
-    # 等待 URL 生成 (Cloudflared 可能需要一点时间)
-    print("等待分配全球加速地址...")
-    if url_found_event.wait(timeout=30):
-        return process, found_url[0]
-    else:
-        process.terminate()
-        return None, None
-
-def open_browser_delayed(url):
-    """延迟打开浏览器"""
-    time.sleep(3)
+def start_cloudflared():
+    """Start Cloudflare Tunnel."""
+    print("🌐 Starting Cloudflare Tunnel...")
+    # cloudflared tunnel --url http://localhost:8501
     try:
-        webbrowser.open(url)
-    except:
-        pass
+        process = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", "http://localhost:8501"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        return process
+    except FileNotFoundError:
+        print("❌ Error: 'cloudflared' not found. Please install Cloudflare Tunnel.")
+        print("Download: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/")
+        sys.exit(1)
+
+def extract_url_from_logs(process, stop_event):
+    """Monitor Cloudflare logs to extract the public URL."""
+    url_pattern = r"https://[a-zA-Z0-9-]+\.trycloudflare\.com"
+    
+    print("⏳ Waiting for public URL...")
+    
+    # Cloudflared outputs to stderr usually
+    while not stop_event.is_set():
+        line = process.stderr.readline()
+        if not line and process.poll() is not None:
+            break
+            
+        if line:
+            # print(f"DEBUG: {line.strip()}") # Uncomment for debugging
+            match = re.search(url_pattern, line)
+            if match:
+                public_url = match.group(0)
+                print(f"\n✅ Public URL generated: {public_url}")
+                print(f"📋 Share this URL with your team to access the app.")
+                
+                # Save to file
+                try:
+                    with open(URL_FILE_PATH, "w") as f:
+                        f.write(public_url)
+                    print(f"💾 URL saved to {URL_FILE_PATH}")
+                except Exception as e:
+                    print(f"⚠️ Failed to save URL to file: {e}")
+                
+                # Keep monitoring for stability, but we found the URL
+                # return public_url 
+                # Don't return, keep reading to prevent buffer fill
+                
+def monitor_tunnel(tunnel_process, stop_event):
+    """Monitor tunnel process health and restart if needed."""
+    while not stop_event.is_set():
+        if tunnel_process.poll() is not None:
+            print("\n⚠️ Cloudflare Tunnel process died! Restarting...")
+            tunnel_process = start_cloudflared()
+            # Start a new log reader for the new process
+            t = threading.Thread(target=extract_url_from_logs, args=(tunnel_process, stop_event))
+            t.daemon = True
+            t.start()
+        time.sleep(5)
 
 def main():
-    print("========================================================")
-    print("      聚羧酸研发管理系统 - 互联网极速访问模式      ")
-    print("========================================================")
-    print("🚀 正在切换至 Cloudflare 全球加速线路...")
-    print("无需账号，无需配置，穿透力更强。")
-    print("")
+    stop_event = threading.Event()
     
-    # 清理旧文件
-    cleanup_url_file()
+    # 1. Start Streamlit
+    streamlit_process = start_streamlit()
     
-    # 启动隧道
-    tunnel_process, public_url = start_cloudflared_tunnel()
+    # Wait a bit for Streamlit to initialize
+    time.sleep(2)
     
-    if public_url:
-        print(f"\n✅ 连接成功！")
-        print(f"🌍 公网访问地址: {public_url}")
-        print("--------------------------------------------------------")
+    # 2. Start Cloudflare Tunnel
+    tunnel_process = start_cloudflared()
+    
+    # 3. Start Log Monitor Thread
+    log_thread = threading.Thread(target=extract_url_from_logs, args=(tunnel_process, stop_event))
+    log_thread.daemon = True
+    log_thread.start()
+    
+    # 4. Start Health Monitor Thread
+    monitor_thread = threading.Thread(target=monitor_tunnel, args=(tunnel_process, stop_event))
+    monitor_thread.daemon = True
+    monitor_thread.start()
+    
+    print("\n⌨️  Press Ctrl+C to stop the server.")
+    
+    try:
+        # Keep main thread alive
+        while True:
+            # Check if Streamlit is still running
+            if streamlit_process.poll() is not None:
+                print("\n⚠️ Streamlit server crashed! Restarting...")
+                streamlit_process = start_streamlit()
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        print("\n🛑 Stopping servers...")
+        stop_event.set()
         
-        # 设置环境变量
-        os.environ["ENABLE_INTERNET_ACCESS"] = "true"
-        os.environ["PUBLIC_ACCESS_URL"] = public_url
+        # Cleanup
+        streamlit_process.terminate()
+        tunnel_process.terminate()
         
-        print("\n正在启动系统界面...")
-        print("提示：如果浏览器提示 0.0.0.0 无法访问，请使用 http://127.0.0.1:8501")
-        
-        # 自动打开正确的本地地址
-        threading.Thread(target=open_browser_delayed, args=("http://127.0.0.1:8501",), daemon=True).start()
-        
-        # 启动 Streamlit
-        cmd = [sys.executable, "-m", "streamlit", "run", "src/main.py", "--server.address", "0.0.0.0", "--server.headless", "true"]
-        
-        try:
-            # 运行 Streamlit (阻塞)
-            subprocess.run(cmd)
-        except KeyboardInterrupt:
-            print("\n正在关闭...")
-        finally:
-            # 清理
-            cleanup_url_file()
-            if tunnel_process:
-                tunnel_process.terminate()
-                
-    else:
-        print("\n❌ 连接 Cloudflare 失败。")
-        print("可能的原因：")
-        print("1. 网络连接不稳定")
-        print("2. Cloudflared 组件下载失败")
-        print("\n建议：")
-        print("- 请确保您的电脑可以访问互联网")
-        print("- 检查是否有杀毒软件拦截了 cloudflared.exe")
-        input("\n按回车键退出...")
+        # Clean up URL file
+        if os.path.exists(URL_FILE_PATH):
+            os.remove(URL_FILE_PATH)
+            print("🧹 Cleaned up URL file.")
+            
+        print("👋 Goodbye!")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()

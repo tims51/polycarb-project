@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import time
 import pandas as pd
 import uuid
+from components.ui_manager import UIManager
 
 @st.dialog("批量删除确认")
 def batch_delete_experiments_dialog(selected_exp_ids, experiments, data_manager):
@@ -34,7 +35,7 @@ def batch_delete_experiments_dialog(selected_exp_ids, experiments, data_manager)
             type="primary",
             disabled=confirm_text != "确认删除"
         ):
-            with st.spinner("正在删除选中的实验..."):
+            with UIManager.with_spinner("正在删除选中的实验..."):
                 success_count = 0
                 error_count = 0
                 current_user = st.session_state.get("current_user")
@@ -60,9 +61,9 @@ def batch_delete_experiments_dialog(selected_exp_ids, experiments, data_manager)
                 st.session_state.show_batch_delete_dialog = False
                 
                 if error_count == 0:
-                    st.success(f"✅ 成功删除 {success_count} 个实验！")
+                    UIManager.toast(f"✅ 成功删除 {success_count} 个实验！", type="success")
                 else:
-                    st.warning(f"⚠️ 成功删除 {success_count} 个实验，{error_count} 个删除失败")
+                    UIManager.toast(f"⚠️ 成功删除 {success_count} 个实验，{error_count} 个删除失败", type="warning")
                 
                 time.sleep(1.5)
                 st.rerun()
@@ -148,12 +149,12 @@ def render_experiment_management(data_manager):
                         "description": description
                     }
                     if data_manager.add_experiment(new_experiment):
-                        st.success(f"实验 '{exp_name}' 创建成功！")
+                        UIManager.toast(f"实验 '{exp_name}' 创建成功！", type="success")
                         st.rerun()
                     else:
-                        st.error("创建实验失败，请重试")
+                        UIManager.toast("创建实验失败，请重试", type="error")
                 else:
-                    st.error("请填写必填项")
+                    UIManager.toast("请填写必填项", type="warning")
     
     st.divider()
     
@@ -614,7 +615,7 @@ def render_experiment_management(data_manager):
                                 }
                                 
                                 if data_manager.update_experiment(st.session_state.editing_experiment_id, updated_experiment):
-                                    st.success(f"✅ 实验 '{edit_exp_name}' 更新成功！")
+                                    UIManager.toast(f"✅ 实验 '{edit_exp_name}' 更新成功！", type="success")
                                     
                                     st.session_state.editing_experiment_id = None
                                     st.session_state.show_edit_form = False
@@ -627,15 +628,15 @@ def render_experiment_management(data_manager):
                                     time.sleep(1)
                                     st.rerun()
                                 else:
-                                    st.error("❌ 保存修改失败，请重试")
+                                    UIManager.toast("❌ 保存修改失败，请重试", type="error")
                             else:
-                                st.error("⚠️ 实验名称和所属项目为必填项")
+                                UIManager.toast("⚠️ 实验名称和所属项目为必填项", type="warning")
                         
                         if cancel_submitted:
                             st.session_state.editing_experiment_id = None
                             st.session_state.show_edit_form = False
                             st.session_state.exp_edit_form_id = None
-                            st.info("已取消编辑操作")
+                            UIManager.toast("已取消编辑操作", type="info")
                             time.sleep(0.5)
                             st.rerun()
         
@@ -708,14 +709,7 @@ def render_experiment_management(data_manager):
                 st.markdown(f"<span style='font-size:14px; padding:2px 0; display:block;'>{exp_plan_date}</span>", unsafe_allow_html=True)
             
             with col_row[6]:
-                status_colors = {
-                    "计划中": "🟡",
-                    "进行中": "🟢",
-                    "已完成": "✅",
-                    "已取消": "❌"
-                }
-                status_emoji = status_colors.get(exp_status, "⚪")
-                st.markdown(f"<span style='font-size:14px; padding:2px 0; display:block;'>{status_emoji} {exp_status}</span>", unsafe_allow_html=True)
+                UIManager.render_status_badge(exp_status)
             
             with col_row[7]:
                 st.markdown(f"<span style='font-size:13px; padding:2px 0; display:block;'>{exp_desc}</span>", unsafe_allow_html=True)

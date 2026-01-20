@@ -3,11 +3,13 @@
 import streamlit as st
 from datetime import datetime, timedelta
 import time
+from components.ui_manager import UIManager
 
 def render_dashboard(data_manager):
     """渲染项目概览页面"""
     user = st.session_state.get("current_user")
     if not user:
+        UIManager.toast("请登录后查看项目概览。", type="info")
         st.info("请登录后查看项目概览。")
         return
     st.header("📊 项目概览")
@@ -20,16 +22,16 @@ def render_dashboard(data_manager):
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         active_projects = sum(1 for p in projects if p.get("status") == "进行中")
-        st.metric("进行中项目", active_projects)
+        UIManager.render_card("进行中项目", str(active_projects), icon="🚀", color="#007bff")
     with col2:
         completed_projects = sum(1 for p in projects if p.get("status") == "已完成")
-        st.metric("已完成项目", completed_projects)
+        UIManager.render_card("已完成项目", str(completed_projects), icon="✅", color="#28a745")
     with col3:
         total_experiments = len(experiments)
-        st.metric("总实验数", total_experiments)
+        UIManager.render_card("总实验数", str(total_experiments), icon="🧪", color="#17a2b8")
     with col4:
         upcoming_exps = sum(1 for e in experiments if e.get("status") == "计划中")
-        st.metric("待进行实验", upcoming_exps)
+        UIManager.render_card("待进行实验", str(upcoming_exps), icon="📅", color="#ffc107")
     
     st.divider()
     
@@ -83,12 +85,13 @@ def _render_add_project_form(data_manager):
                     "description": new_desc
                 }
                 if data_manager.add_project(new_project):
-                    st.success(f"项目 '{new_name}' 添加成功！")
+                    UIManager.toast(f"项目 '{new_name}' 添加成功！", type="success")
+                    time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error("添加项目失败，请重试")
+                    UIManager.toast("添加项目失败，请重试", type="error")
             else:
-                st.error("请填写带*的必填项")
+                UIManager.toast("请填写带*的必填项", type="warning")
 
 def _render_edit_project_section(data_manager, projects):
     """渲染编辑项目部分"""
@@ -214,13 +217,13 @@ def _render_edit_project_form(data_manager, project_id, projects):
                     }
                     
                     if data_manager.update_project(project_id, updated_fields):
-                        st.success(f"✅ 项目 '{edit_name}' 更新成功！")
+                        UIManager.toast(f"项目 '{edit_name}' 更新成功！", type="success")
                         time.sleep(0.5)
                         st.rerun()
                     else:
-                        st.error("❌ 更新项目失败，请重试")
+                        UIManager.toast("更新项目失败，请重试", type="error")
                 else:
-                    st.error("⚠️ 项目名称和负责人为必填项")
+                    UIManager.toast("项目名称和负责人为必填项", type="warning")
 
 def _render_delete_project_section(data_manager, projects):
     """渲染删除项目部分"""
@@ -279,9 +282,9 @@ def _render_delete_confirmation(data_manager, project_id, project_name):
                 type="primary",
                 use_container_width=True
             ):
-                with st.spinner(f"正在删除项目 '{current_project}'..."):
+                with UIManager.with_spinner(f"正在删除项目 '{current_project}'..."):
                     if data_manager.delete_project(project_id):
-                        st.success(f"✅ 项目 '{current_project}' 已成功删除！")
+                        UIManager.toast(f"项目 '{current_project}' 已成功删除！", type="success")
                         
                         if delete_state_key in st.session_state:
                             del st.session_state[delete_state_key]
@@ -289,7 +292,7 @@ def _render_delete_confirmation(data_manager, project_id, project_name):
                         time.sleep(1)
                         st.rerun()
                     else:
-                        st.error(f"❌ 删除项目 '{current_project}' 失败")
+                        UIManager.toast(f"删除项目 '{current_project}' 失败", type="error")
                         st.session_state[delete_state_key]["show_confirm"] = False
         
         with confirm_col2:
@@ -299,7 +302,7 @@ def _render_delete_confirmation(data_manager, project_id, project_name):
                 use_container_width=True
             ):
                 st.session_state[delete_state_key]["show_confirm"] = False
-                st.info("已取消删除操作")
+                UIManager.toast("已取消删除操作", type="info")
                 time.sleep(0.5)
                 st.rerun()
 
@@ -321,7 +324,7 @@ def _render_project_details(data_manager, projects):
                 with col_title:
                     st.markdown(f"### {status_emoji} {project.get('name', '未命名项目')}")
                 with col_status:
-                    st.markdown(f"**{project.get('status', '未知')}**")
+                    UIManager.render_status_badge(project.get("status", "未知"))
                 
                 # 详细信息
                 col_info, col_desc = st.columns([2, 2])
@@ -387,34 +390,35 @@ def _render_project_progress_and_timeline(data_manager, project):
     
     timeline_info = data_manager.get_project_timeline(project.get("id"))
     
-    if timeline_info and timeline_info.get('is_valid'):
-        status = timeline_info.get('status', '未知')
-        status_emoji = timeline_info.get('status_emoji', '📅')
-        passed_days = timeline_info.get('passed_days', 0)
-        total_days = timeline_info.get('total_days', 1)
+    if timeline_info and timeline_info.is_valid:
+        status = timeline_info.status
+        status_emoji = timeline_info.status_emoji
+        passed_days = timeline_info.passed_days
+        total_days = timeline_info.total_days
         
         st.markdown(f"**{status_emoji} {status}**")
         
         timeline_col1, timeline_col2 = st.columns([3, 1])
         with timeline_col1:
-            percent = timeline_info.get('percent', 0)
+            percent = timeline_info.percent
             st.progress(percent / 100)
         with timeline_col2:
             st.caption(f"{passed_days}/{total_days}天")
         
-        start_date = timeline_info.get('start_date')
-        end_date = timeline_info.get('end_date')
+        start_date = timeline_info.start_date
+        end_date = timeline_info.end_date
         if start_date and end_date:
             st.caption(f"📅 {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
         
         if status == "尚未开始":
-            st.info(f"项目将于 {start_date.strftime('%Y-%m-%d')} 开始")
+            if start_date:
+                st.info(f"项目将于 {start_date.strftime('%Y-%m-%d')} 开始")
         elif status == "已完成":
             st.success("项目已按时完成")
         elif status == "进行中":
             remaining_days = total_days - passed_days
             if remaining_days > 0:
-                estimated_completion = timeline_info.get('estimated_completion')
+                estimated_completion = timeline_info.estimated_completion
                 if estimated_completion:
                     st.info(f"剩余 {remaining_days} 天，预计 {estimated_completion.strftime('%Y-%m-%d')} 完成")
     else:

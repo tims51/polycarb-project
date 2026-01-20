@@ -2,15 +2,32 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from core.analysis_manager import AnalysisManager
+from services.analysis_service import AnalysisService
 import json
 
 def render_analysis_page(data_manager):
     """渲染数据分析页面"""
     st.header("📈 数据分析与AI训练")
     
-    # 初始化分析管理器
-    am = AnalysisManager(data_manager)
+    # 初始化分析服务
+    # 假设 data_manager 兼容 data_service 接口，或者我们需要从 data_manager 获取 data_service
+    # 在 main.py 中，通常 data_manager 被传递。
+    # 为了兼容，如果 AnalysisService 需要 DataService，我们这里可能需要适配。
+    # 实际上，DataService 是 DataManager 的一个包装或替代。
+    # 如果系统已经迁移到 DataService，我们应该从 session_state 获取，或者假设 data_manager 具有相应方法。
+    # 鉴于之前的重构，我们假设 data_manager 可以直接用，或者我们需要一个 DataService 实例。
+    # 这里我们尝试从 session_state 获取 data_service，如果没有则使用传入的 data_manager (假设它兼容)
+    
+    if 'data_service' in st.session_state:
+        data_service = st.session_state.data_service
+    else:
+        # 临时兼容：如果 DataManager 和 DataService 接口相似，或者 DataService 可以用 DataManager 初始化
+        # 实际上 AnalysisService 需要 DataService。
+        # 我们这里直接传入 data_manager，但在 AnalysisService 中它被命名为 self.data_service
+        # 只要 data_manager 有 get_all_concrete_experiments 等方法即可。
+        data_service = data_manager
+
+    am = AnalysisService(data_service)
     
     # 数据源选择
     with st.sidebar:

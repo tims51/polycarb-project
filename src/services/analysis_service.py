@@ -7,6 +7,7 @@ Handles data analysis, DataFrame conversion, and AI preparation.
 import pandas as pd
 import numpy as np
 import logging
+import streamlit as st
 from typing import Dict, Any, List, Optional, Union
 from services.data_service import DataService
 
@@ -18,16 +19,25 @@ class AnalysisService:
     def __init__(self, data_service: DataService):
         self.data_service = data_service
 
-    def _flatten_dict(self, d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
-        """Recursively flatten nested dictionaries."""
-        items = []
-        for k, v in d.items():
-            new_key = f"{parent_key}{sep}{k}" if parent_key else k
-            if isinstance(v, dict):
-                items.extend(self._flatten_dict(v, new_key, sep=sep).items())
-            else:
-                items.append((new_key, v))
-        return dict(items)
+    @staticmethod
+    @st.cache_data(show_spinner=False)
+    def _convert_to_dataframe_cached(data: List[Dict[str, Any]]) -> pd.DataFrame:
+        """
+        Convert list of dicts to flattened DataFrame with caching.
+        Uses pd.json_normalize for vectorized flattening.
+        """
+        if not data:
+            return pd.DataFrame()
+        
+        # Vectorized flattening
+        df = pd.json_normalize(data, sep='_')
+        
+        # Vectorized numeric conversion
+        # Use apply to convert all columns that can be converted to numeric
+        # 'ignore' will leave non-numeric columns as is
+        df = df.apply(pd.to_numeric, errors='ignore')
+        
+        return df
 
     def get_data_as_dataframe(self, data_type: str = "concrete") -> pd.DataFrame:
         """
@@ -52,27 +62,16 @@ class AnalysisService:
             if not data:
                 return pd.DataFrame()
 
-            # Flatten nested structures
-            flattened_data = [self._flatten_dict(record) for record in data]
-            df = pd.DataFrame(flattened_data)
-            
-            # Convert numeric columns
-            for col in df.columns:
-                # Skip non-numeric columns based on name heuristics
-                if any(x in col for x in ["name", "id", "date", "note", "description", "code"]):
-                    continue
-                try:
-                    df[col] = pd.to_numeric(df[col])
-                except (ValueError, TypeError):
-                    pass
-                
-            return df
+            # Use cached static method for heavy lifting
+            return self._convert_to_dataframe_cached(data)
             
         except Exception as e:
             logger.error(f"Error converting data to DataFrame: {e}")
             return pd.DataFrame()
 
-    def get_correlation_matrix(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    @st.cache_data(show_spinner=False)
+    def get_correlation_matrix(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate correlation matrix for numeric columns."""
         numeric_df = df.select_dtypes(include=[np.number])
         if numeric_df.empty:
@@ -94,17 +93,27 @@ class AnalysisService:
         return df_clean
 
     def normalize_data(self, df: pd.DataFrame, columns: Optional[List[str]] = None) -> pd.DataFrame:
-        """Normalize data (Z-score)."""
+        """Normalize data (Z-score) using vectorized operations."""
         df_norm = df.copy()
         if columns is None:
             columns = df_norm.select_dtypes(include=[np.number]).columns.tolist()
             
-        for col in columns:
-            if col in df_norm.columns:
-                if df_norm[col].std() != 0:
-                    df_norm[col] = (df_norm[col] - df_norm[col].mean()) / df_norm[col].std()
-                else:
-                    df_norm[col] = 0
+        # Filter columns that actually exist
+        valid_cols = [c for c in columns if c in df_norm.columns]
+        
+        if not valid_cols:
+            return df_norm
+
+        # Vectorized normalization
+        # Handle division by zero by replacing std 0 with 1 (result will be 0)
+        means = df_norm[valid_cols].mean()
+        stds = df_norm[valid_cols].std()
+        
+        # Replace 0 std with 1 to avoid NaN (result 0/1 = 0)
+        stds = stds.replace(0, 1)
+        
+        df_norm[valid_cols] = (df_norm[valid_cols] - means) / stds
+        
         return df_norm
 
     def prepare_ai_dataset(self, df: pd.DataFrame, target_col: str, feature_cols: Optional[List[str]] = None, split_ratio: float = 0.8) -> Union[Dict[str, Any], tuple]:

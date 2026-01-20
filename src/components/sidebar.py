@@ -8,35 +8,72 @@ import streamlit as st
 from datetime import datetime
 from typing import Callable, Dict
 from services.data_service import DataService
-from components.ui_manager import render_ui_settings
-from components.access_manager import render_mobile_access_sidebar, render_internet_access_sidebar
+from components.ui_manager import render_ui_settings, UIManager
+from components.access_manager import render_mobile_access_sidebar, render_internet_access_sidebar, check_page_permission
 
 def render_sidebar(data_service: DataService, page_routes: Dict[str, Callable]):
     """
-    Render the main sidebar.
-    
-    Args:
-        data_service: Instance of DataService.
-        page_routes: Dictionary mapping page names to render functions.
-        
-    Returns:
-        The selected page function.
+    Render the main sidebar with collapsible groups.
     """
     with st.sidebar:
         st.title("导航菜单")
         
         user = st.session_state.get("current_user")
-        menu_options = []
-        for key in page_routes.keys():
-            if key == "💾 数据管理" and (not user or user.get("role") != "admin"):
-                continue
-            menu_options.append(key)
-        # Default to the first page if not set
-        if "selected_page" not in st.session_state:
-            st.session_state.selected_page = menu_options[0]
-            
-        selected_option = st.radio("选择功能", menu_options, key="sidebar_nav_radio")
         
+        # 1. Define Menu Structure
+        # Map page names (keys in page_routes) to Groups
+        # Note: We rely on exact string matching with main.py keys
+        menu_structure = {
+            "📊 仪表盘": ["📊 仪表盘"],
+            "🧪 实验管理": ["🧪 实验记录", "📋 实验管理"],
+            "📈 数据洞察": ["📈 数据分析"],
+            "🏭 供应链与生产": ["📦 原材料管理", "🏭 产品库存", "🏭 SAP/BOM 管理"],
+            "⚙️ 系统设置": ["💾 数据管理"]
+        }
+        
+        # Fallback for pages not in structure
+        known_pages = [p for group in menu_structure.values() for p in group]
+        others = [p for p in page_routes.keys() if p not in known_pages]
+        if others:
+            menu_structure["📦 其他功能"] = others
+            
+        # 2. Render Navigation
+        if "selected_page" not in st.session_state:
+            st.session_state.selected_page = "📊 仪表盘" # Default
+            
+        # Filter available pages based on permission
+        available_pages = [p for p in page_routes.keys() if check_page_permission(user, p)]
+        
+        # If current selection is invalid, reset
+        if st.session_state.selected_page not in available_pages and available_pages:
+             st.session_state.selected_page = available_pages[0]
+        
+        # Render Groups
+        for group_name, pages in menu_structure.items():
+            # Filter pages in this group
+            group_pages = [p for p in pages if p in available_pages]
+            
+            if not group_pages:
+                continue
+            
+            # Auto-expand if current page is in this group
+            is_expanded = st.session_state.selected_page in group_pages
+            
+            # Special case for Dashboard (no expander needed usually, but for consistency we can use one or just buttons)
+            # If group has only 1 item and it's Dashboard, maybe just show button? 
+            # But "collapsible groups" was requested.
+            
+            with st.expander(group_name, expanded=is_expanded):
+                for page_name in group_pages:
+                    # Use button for navigation
+                    # Highlight active page
+                    if st.session_state.selected_page == page_name:
+                        st.button(f"📍 {page_name}", key=f"nav_{page_name}", type="primary", use_container_width=True, disabled=True)
+                    else:
+                        if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
+                            st.session_state.selected_page = page_name
+                            st.rerun()
+                            
         st.markdown("---")
         
         # UI Settings
@@ -71,4 +108,4 @@ def render_sidebar(data_service: DataService, page_routes: Dict[str, Callable]):
         render_mobile_access_sidebar()
         render_internet_access_sidebar()
         
-        return page_routes[selected_option]
+        return page_routes.get(st.session_state.selected_page)

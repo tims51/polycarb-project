@@ -20,6 +20,7 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 APP_NAME = "聚羧酸减水剂研发管理系统"
 APP_ICON = "🧪"
 VERSION = "2.7.0"
+DEFAULT_UNIT = "吨" # Avoid importing from core.enums to prevent circular import
 
 # UI Settings
 DEFAULT_FONT_SCALE = 1.0

@@ -9,6 +9,27 @@ import streamlit as st
 from utils.helpers import get_local_ip, generate_qr_code
 from config import URL_FILE_PATH
 
+def check_page_permission(user: dict, page_name: str) -> bool:
+    """
+    Check if the current user has permission to access the page.
+    """
+    # Define restricted pages and required roles
+    # For now, only '💾 数据管理' requires admin
+    restricted_pages = {
+        "💾 数据管理": ["admin"]
+    }
+    
+    if page_name not in restricted_pages:
+        return True
+        
+    allowed_roles = restricted_pages[page_name]
+    
+    if not user:
+        return False
+        
+    user_role = user.get("role", "guest")
+    return user_role in allowed_roles
+
 def render_mobile_access_sidebar():
     """Render the Mobile Access section in the sidebar."""
     with st.sidebar.expander("📱 手机端访问", expanded=False):

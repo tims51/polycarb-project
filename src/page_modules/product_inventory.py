@@ -5,6 +5,7 @@ import plotly.express as px
 from datetime import datetime, date, timedelta
 from services.inventory_service import InventoryService
 from core.data_manager import DataManager
+from components.ui_manager import UIManager
 
 def render_product_inventory_page(data_manager: DataManager):
     st.title("📦 成品库存管理")
@@ -25,24 +26,27 @@ def render_product_inventory_page(data_manager: DataManager):
         
         # 1. KPI Cards
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric("总库存量", f"{summary['total_stock']:.2f} 吨", delta=None)
-        kpi2.metric("在库产品数", f"{summary['product_count']} 个")
+        with kpi1:
+            UIManager.render_card("总库存量", f"{summary['total_stock']:.2f} 吨", icon="📦", color="#007bff")
+        with kpi2:
+            UIManager.render_card("在库产品数", f"{summary['product_count']} 个", icon="🏭", color="#28a745")
         
         low_count = len(summary['low_stock_items'])
-        kpi3.metric("库存预警", f"{low_count} 项", delta=f"-{low_count}" if low_count > 0 else "正常", delta_color="inverse")
+        with kpi3:
+            delta_val = f"-{low_count}" if low_count > 0 else "正常"
+            UIManager.render_card("库存预警", f"{low_count} 项", sub_value=delta_val, icon="⚠️", color="#dc3545" if low_count > 0 else "#28a745")
         
         st.markdown("---")
         
         # 2. 预警列表
         if low_count > 0:
-            st.error(f"⚠️ 以下 {low_count} 个产品库存低于 10 吨，请及时补货！")
+            UIManager.toast(f"⚠️ 以下 {low_count} 个产品库存低于 10 吨，请及时补货！", type="warning")
             low_df = pd.DataFrame(summary['low_stock_items'])
-            st.dataframe(
+            UIManager.render_data_table(
                 low_df[["product_name", "type", "current_stock", "unit"]].rename(columns={
                     "product_name": "产品名称", "type": "类型", "current_stock": "当前库存", "unit": "单位"
                 }),
-                hide_index=True,
-                use_container_width=True
+                mobile_cols=["产品名称", "当前库存", "单位"]
             )
         
         # 3. 库存分布图表
@@ -96,19 +100,20 @@ def render_product_inventory_page(data_manager: DataManager):
                 submitted = st.form_submit_button("确认入库", type="primary")
                 if submitted:
                     if not final_p_name:
-                        st.error("请输入产品名称")
+                        UIManager.toast("请输入产品名称", type="error")
                     elif not batch_no:
-                        st.error("必须填写生产批号以进行追溯")
+                        UIManager.toast("必须填写生产批号以进行追溯", type="error")
                     else:
-                        success, msg = service.process_inbound(
-                            final_p_name, p_type, qty, batch_no, 
-                            operator=st.session_state.get("username", "Admin"),
-                            date_str=op_date.strftime("%Y-%m-%d")
-                        )
-                        if success:
-                            st.success(f"✅ 入库成功！库存已更新。")
-                        else:
-                            st.error(f"❌ 失败: {msg}")
+                        with UIManager.with_spinner("正在处理入库..."):
+                            success, msg = service.process_inbound(
+                                final_p_name, p_type, qty, batch_no, 
+                                operator=st.session_state.get("username", "Admin"),
+                                date_str=op_date.strftime("%Y-%m-%d")
+                            )
+                            if success:
+                                UIManager.toast(f"✅ 入库成功！库存已更新。", type="success")
+                            else:
+                                UIManager.toast(f"❌ 失败: {msg}", type="error")
 
         elif op_type == "销售出库":
             st.markdown("#### 🚚 销售出库登记")
@@ -131,17 +136,18 @@ def render_product_inventory_page(data_manager: DataManager):
                 submitted = st.form_submit_button("确认出库", type="primary")
                 if submitted:
                     if not customer:
-                        st.error("请填写客户名称")
+                        UIManager.toast("请填写客户名称", type="error")
                     else:
-                        success, msg = service.process_outbound(
-                            p_name, qty, customer, remark,
-                            operator=st.session_state.get("username", "Admin"),
-                            date_str=op_date.strftime("%Y-%m-%d")
-                        )
-                        if success:
-                            st.success(f"✅ 出库成功！库存已扣减。")
-                        else:
-                            st.error(f"❌ 失败: {msg}")
+                        with UIManager.with_spinner("正在处理出库..."):
+                            success, msg = service.process_outbound(
+                                p_name, qty, customer, remark,
+                                operator=st.session_state.get("username", "Admin"),
+                                date_str=op_date.strftime("%Y-%m-%d")
+                            )
+                            if success:
+                                UIManager.toast(f"✅ 出库成功！库存已扣减。", type="success")
+                            else:
+                                UIManager.toast(f"❌ 失败: {msg}", type="error")
 
         elif op_type == "库存校准":
             st.markdown("#### ⚖️ 库存盘点校准")
@@ -163,19 +169,20 @@ def render_product_inventory_page(data_manager: DataManager):
             
             if st.button("确认校准并生成调整单", type="primary"):
                 if abs(diff) < 0.0001:
-                    st.warning("无差异，无需调整")
+                    UIManager.toast("无差异，无需调整", type="warning")
                 elif not reason:
-                    st.error("请填写差异原因")
+                    UIManager.toast("请填写差异原因", type="error")
                 else:
-                    success, msg = service.calibrate_stock(
-                        p_name, actual_stock, reason,
-                        operator=st.session_state.get("username", "Admin")
-                    )
-                    if success:
-                        st.success("✅ 校准成功！")
-                        st.rerun()
-                    else:
-                        st.error(msg)
+                    with UIManager.with_spinner("正在校准库存..."):
+                        success, msg = service.calibrate_stock(
+                            p_name, actual_stock, reason,
+                            operator=st.session_state.get("username", "Admin")
+                        )
+                        if success:
+                            UIManager.toast("✅ 校准成功！", type="success")
+                            st.rerun()
+                        else:
+                            UIManager.toast(msg, type="error")
 
     # ==================== Tab 3: 明细查询 ====================
     with tab_reports:
@@ -218,9 +225,9 @@ def render_product_inventory_page(data_manager: DataManager):
             # 格式化
             df_display = df_records[display_cols.keys()].rename(columns=display_cols)
             
-            st.dataframe(
+            UIManager.render_data_table(
                 df_display, 
-                use_container_width=True,
+                mobile_cols=["产品名称", "变动类型", "数量", "结存"],
                 hide_index=True,
                 column_config={
                     "数量": st.column_config.NumberColumn("数量", format="%.4f"),

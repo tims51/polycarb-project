@@ -1,9 +1,10 @@
 """数据管理模块 - 主要数据管理类"""
 
+from typing import List, Dict, Any, Optional, Union, Tuple
 import json
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 import pandas as pd
 import base64
 from io import BytesIO
@@ -16,21 +17,34 @@ from openpyxl.chart import LineChart, BarChart, Reference
 from openpyxl.styles import Font, Alignment
 
 from core.timeline_manager import TimelineManager
+from core.models import (
+    Project, Experiment, User, BaseModelWithConfig, TimelineInfo,
+    RawMaterial, SynthesisRecord, Product, InventoryRecord, MotherLiquor,
+    BOM, BOMVersion, ProductionOrder, PasteExperiment, MortarExperiment, ConcreteExperiment,
+    ProductInventoryRecord, GoodsReceipt, ShippingOrder, GoodsReceiptItem, ShippingOrderItem, BOMExplosionItem
+)
+from core.enums import (
+    ProjectStatus, ExperimentStatus, ExperimentType, UserRole, MotherLiquorSourceType, 
+    StockMovementType, BOMStatus, ProductionOrderStatus, IssueStatus, ProductCategory, UnitType, PriorityType, MaterialType, DataCategory,
+    ReceiptStatus, ShippingStatus, PermissionAction
+)
+from config import DATA_FILE, BACKUP_DIR, DEFAULT_UNIT
+from core.constants import DATE_FORMAT, DATETIME_FORMAT, BACKUP_INTERVAL_SECONDS, DEFAULT_OPERATOR_NAME, DEFAULT_UNIT_KG, WATER_MATERIAL_ALIASES, PRODUCT_NAME_WJSNJ, PRODUCT_NAME_YJSNJ, DEFAULT_BOM_PLAN_QTY
 from utils.logger import logger
 from utils.unit_helper import convert_quantity, normalize_unit
+from utils.file_lock import file_lock
 
 class DataManager:
     """统一数据管理器"""
     
-    def __init__(self, data_file_path=None):
-        # Point to data.json in the project root (polycarb_project/data.json)
-        # app/core/data_manager.py -> app/core -> app -> polycarb_project
+    def __init__(self, data_file_path: Optional[str] = None):
         if data_file_path:
             self.data_file = Path(data_file_path)
+            self.backup_dir = Path(data_file_path).parent / "backups"
         else:
-            self.data_file = Path(__file__).parent.parent.parent / "data" / "data.json"
+            self.data_file = DATA_FILE
+            self.backup_dir = BACKUP_DIR
             
-        self.backup_dir = Path(__file__).parent.parent.parent / "data" / "backups"
         self._data_cache = None
         self._ensure_valid_data_file()
         self._ensure_backup_dir()
@@ -62,20 +76,20 @@ class DataManager:
     def _ensure_data_structure(self, data):
         """确保数据结构完整"""
         required_keys = [
-            "projects", "experiments", "performance_data",
-            "raw_materials", "synthesis_records", "products",
-            "paste_experiments", "mortar_experiments", "concrete_experiments",
-            "mother_liquors",
+            DataCategory.PROJECTS.value, DataCategory.EXPERIMENTS.value, DataCategory.PERFORMANCE_DATA.value,
+            DataCategory.RAW_MATERIALS.value, DataCategory.SYNTHESIS_RECORDS.value, DataCategory.PRODUCTS.value,
+            DataCategory.PASTE_EXPERIMENTS.value, DataCategory.MORTAR_EXPERIMENTS.value, DataCategory.CONCRETE_EXPERIMENTS.value,
+            DataCategory.MOTHER_LIQUORS.value,
             # SAP/BOM Modules
-            "inventory_records", "boms", "bom_versions", 
-            "production_orders", "material_issues", "goods_receipts",
+            DataCategory.INVENTORY_RECORDS.value, DataCategory.BOMS.value, DataCategory.BOM_VERSIONS.value, 
+            DataCategory.PRODUCTION_ORDERS.value, DataCategory.MATERIAL_ISSUES.value, DataCategory.GOODS_RECEIPTS.value, DataCategory.SHIPPING_ORDERS.value,
             # 用户与权限
-            "users"
+            DataCategory.USERS.value, DataCategory.AUDIT_LOGS.value
         ]
         
         for key in required_keys:
             if key not in data:
-                if key == "performance_data":
+                if key == DataCategory.PERFORMANCE_DATA.value:
                     data[key] = {"synthesis": [], "paste": [], "mortar": [], "concrete": []}
                 else:
                     data[key] = []
@@ -110,19 +124,51 @@ class DataManager:
         """保存数据到JSON文件，并创建备份"""
         try:
             self.data_file.parent.mkdir(parents=True, exist_ok=True)
-            temp_file = self.data_file.with_suffix('.tmp')
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
-            temp_file.replace(self.data_file)
+            
+            # 使用文件锁防止并发写入冲突
+            with file_lock(self.data_file, timeout=10):
+                # 1. 强制备份 (Atomic Pre-write Backup)
+                self.create_backup(force=True)
+                
+                # 2. 原子写入 (Write to temp -> Flush -> Rename)
+                temp_file = self.data_file.with_suffix('.tmp')
+                
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=4)
+                    f.flush()
+                    os.fsync(f.fileno()) # 确保数据落盘
+                
+                # 原子替换 (Windows上如果目标存在可能会有问题，但在context manager保护下相对安全，且os.replace在py3中尽可能原子)
+                if temp_file.exists():
+                    try:
+                        os.replace(temp_file, self.data_file)
+                    except OSError:
+                         # Windows fallback: remove target then rename
+                        if os.name == 'nt' and self.data_file.exists():
+                            try:
+                                os.remove(self.data_file)
+                                os.rename(temp_file, self.data_file)
+                            except Exception as e:
+                                logger.error(f"Windows atomic write fallback failed: {e}")
+                                raise
+                        else:
+                            raise
+            
             self._data_cache = self._ensure_data_structure(data)
-            self.check_and_create_auto_backup()
+            # 记录最后备份时间 (虽然create_backup(force=True)已经做了，但为了兼容check_and_create_auto_backup逻辑)
+            st.session_state.last_backup_time = datetime.now()
+            
             return True
         except Exception as e:
             st.error(f"保存数据失败: {e}")
+            logger.error(f"Save data failed: {e}")
             return False
     
     def check_and_create_auto_backup(self):
-        """检查并创建自动备份（每小时最多一次）"""
+        """
+        检查并创建自动备份
+        (注：save_data 现已强制备份，此方法主要用于非写入触发的定时检查，或者保持兼容性)
+        """
         try:
             # 获取当前时间
             now = datetime.now()
@@ -134,37 +180,39 @@ class DataManager:
             if last_backup is None:
                 should_backup = True
             elif isinstance(last_backup, datetime):
-                # 如果上次备份超过1小时
-                if (now - last_backup).total_seconds() > 3600:
+                # 如果上次备份超过设定间隔
+                if (now - last_backup).total_seconds() > BACKUP_INTERVAL_SECONDS:
                     should_backup = True
             else:
-                # 兼容旧的date类型或其它情况
                 should_backup = True
                 
             if should_backup:
-                # 创建备份
                 self.create_backup()
-                # 更新备份时间
                 st.session_state.last_backup_time = now
         except Exception as e:
             print(f"检查备份失败: {e}")
     
-    def create_backup(self):
-        """创建数据备份"""
+    def create_backup(self, force=False):
+        """
+        创建数据备份
+        Args:
+            force: 是否强制备份（忽略间隔检查，通常用于写入前）
+        """
         try:
             if self.data_file.exists():
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f") # 增加微秒以防快速连续写入
                 backup_file = self.backup_dir / f"data_backup_{timestamp}.json"
                 
                 # 复制文件
                 shutil.copy2(self.data_file, backup_file)
                 
-                # 清理旧的备份文件（保留最近30天的备份）
-                self._cleanup_old_backups()
+                # 清理旧的备份文件（保留最近50个，防止写入频繁导致磁盘满）
+                self._cleanup_old_backups(max_backups=50)
                 
                 return True
         except Exception as e:
             print(f"创建备份失败: {e}")
+            logger.error(f"Create backup failed: {e}")
             return False
     
     def _cleanup_old_backups(self, max_backups=30):
@@ -186,17 +234,17 @@ class DataManager:
 
     
     # -------------------- 获取初始数据 --------------------
-    def get_initial_data(self):
+    def get_initial_data(self) -> Dict[str, Any]:
         """返回初始数据结构"""
         return {
-            "projects": [
+            DataCategory.PROJECTS.value: [
                 {
                     "id": 1,
                     "name": "PC-001合成优化",
                     "leader": "张三",
                     "start_date": "2024-01-01",
                     "end_date": "2024-03-01",
-                    "status": "进行中",
+                    "status": ProjectStatus.IN_PROGRESS.value,
                     "progress": 75,
                     "description": "优化聚羧酸合成工艺参数"
                 },
@@ -206,25 +254,25 @@ class DataManager:
                     "leader": "李四",
                     "start_date": "2024-01-10",
                     "end_date": "2024-02-15",
-                    "status": "已完成",
+                    "status": ProjectStatus.COMPLETED.value,
                     "progress": 100,
                     "description": "测试不同配方性能"
                 }
             ],
-            "experiments": [
+            DataCategory.EXPERIMENTS.value: [
                 {
                     "id": 1,
                     "name": "PC-001-合成实验1",
-                    "type": "合成实验",
+                    "type": ExperimentType.SYNTHESIS.value,
                     "project_id": 1,
                     "planned_date": "2024-01-20",
                     "actual_date": "2024-01-20",
-                    "priority": "高",
-                    "status": "已完成",
+                    "priority": PriorityType.HIGH.value,
+                    "status": ExperimentStatus.COMPLETED.value,
                     "description": "第一轮合成实验"
                 }
             ],
-            "performance_data": {
+            DataCategory.PERFORMANCE_DATA.value: {
                 "synthesis": [
                     {
                         "id": 1,
@@ -240,39 +288,48 @@ class DataManager:
                 "mortar": [],
                 "concrete": []
             },
-            "raw_materials": [],
-            "synthesis_records": [],
-            "products": [],
-            "paste_experiments": [],
-            "mortar_experiments": [],
-            "concrete_experiments": [],
-            "mother_liquors": [],
-            "inventory_records": [],
-            "boms": [],
-            "bom_versions": [],
-            "production_orders": [],
-            "material_issues": [],
-            "goods_receipts": [],
-            "users": []
+            DataCategory.RAW_MATERIALS.value: [],
+            DataCategory.SYNTHESIS_RECORDS.value: [],
+            DataCategory.PRODUCTS.value: [],
+            DataCategory.PASTE_EXPERIMENTS.value: [],
+            DataCategory.MORTAR_EXPERIMENTS.value: [],
+            DataCategory.CONCRETE_EXPERIMENTS.value: [],
+            DataCategory.MOTHER_LIQUORS.value: [],
+            DataCategory.INVENTORY_RECORDS.value: [],
+            DataCategory.BOMS.value: [],
+            DataCategory.BOM_VERSIONS.value: [],
+            DataCategory.PRODUCTION_ORDERS.value: [],
+            DataCategory.MATERIAL_ISSUES.value: [],
+            DataCategory.GOODS_RECEIPTS.value: [],
+            DataCategory.SHIPPING_ORDERS.value: [],
+            DataCategory.USERS.value: [],
+            DataCategory.AUDIT_LOGS.value: []
         }
     
     # -------------------- 项目CRUD操作 --------------------
-    def get_all_projects(self):
+    def get_all_projects(self) -> List[Dict[str, Any]]:
         """获取所有项目"""
         data = self.load_data()
-        return data.get("projects", [])
+        return data.get(DataCategory.PROJECTS.value, [])
 
     # -------------------- 用户与权限管理 --------------------
-    def _hash_password(self, password, salt):
+    def _hash_password(self, password: str, salt: str) -> str:
         value = f"{salt}:{password}".encode("utf-8")
         return hashlib.sha256(value).hexdigest()
     
-    def has_permission(self, user, action: str) -> bool:
+    def has_permission(self, user: Union[Dict, User], action: str) -> bool:
         if not user:
             return False
-        role = user.get("role", "user")
+        
+        # 兼容字典和对象访问
+        role_str = user.get("role", UserRole.USER.value) if isinstance(user, dict) else user.role
+        
+        # 确保 role_str 是字符串值
+        if hasattr(role_str, "value"):
+            role_str = role_str.value
+
         matrix = {
-            "admin": {
+            UserRole.ADMIN.value: {
                 "view_dashboard",
                 "manage_experiments",
                 "manage_raw_materials",
@@ -282,7 +339,7 @@ class DataManager:
                 "manage_data",
                 "manage_users",
             },
-            "user": {
+            UserRole.USER.value: {
                 "view_dashboard",
                 "manage_experiments",
                 "manage_raw_materials",
@@ -290,12 +347,12 @@ class DataManager:
                 "manage_inventory",
             },
         }
-        perms = matrix.get(role, set())
+        perms = matrix.get(role_str, set())
         return action in perms
     
-    def get_all_users(self):
+    def get_all_users(self) -> List[Dict[str, Any]]:
         data = self.load_data()
-        return data.get("users", [])
+        return data.get(DataCategory.USERS.value, [])
 
     def get_user_by_username(self, username):
         username = str(username or "").strip().lower()
@@ -305,11 +362,11 @@ class DataManager:
                 return u
         return None
 
-    def create_user(self, username, password, role="user"):
+    def create_user(self, username, password, role=UserRole.USER.value):
         username = str(username or "").strip()
         if not username or not password:
             return False, "用户名和密码不能为空"
-        if role != "admin":
+        if role != UserRole.ADMIN.value:
             parts = username.split()
             if len(parts) != 2:
                 return False, "用户名格式应为“姓名 手机号”"
@@ -320,11 +377,11 @@ class DataManager:
         if self.get_user_by_username(username):
             return False, "用户名已存在"
         data = self.load_data()
-        users = data.get("users", [])
+        users = data.get(DataCategory.USERS.value, [])
         new_id = max([u.get("id", 0) for u in users], default=0) + 1
         salt = secrets.token_hex(16)
         pwd_hash = self._hash_password(password, salt)
-        role_norm = role if role in ["admin", "user"] else "user"
+        role_norm = role if role in [UserRole.ADMIN.value, UserRole.USER.value] else UserRole.USER.value
         users.append({
             "id": new_id,
             "username": username,
@@ -334,7 +391,7 @@ class DataManager:
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "active": True
         })
-        data["users"] = users
+        data[DataCategory.USERS.value] = users
         if self.save_data(data):
             return True, "注册成功"
         return False, "保存失败"
@@ -347,12 +404,12 @@ class DataManager:
         expected = user.get("password_hash", "")
         calc = self._hash_password(password, salt)
         if secrets.compare_digest(calc, expected):
-            return True, {"id": user.get("id"), "username": user.get("username"), "role": user.get("role", "user")}
+            return True, {"id": user.get("id"), "username": user.get("username"), "role": user.get("role", UserRole.USER.value)}
         return False, None
 
     def change_user_password(self, user_id, old_password, new_password):
         data = self.load_data()
-        users = data.get("users", [])
+        users = data.get(DataCategory.USERS.value, [])
         target_index = -1
         for i, u in enumerate(users):
             if u.get("id") == user_id:
@@ -373,24 +430,24 @@ class DataManager:
         user["salt"] = new_salt
         user["password_hash"] = new_hash
         users[target_index] = user
-        data["users"] = users
+        data[DataCategory.USERS.value] = users
         if self.save_data(data):
             return True, "登录密码已更新"
         return False, "保存失败"
 
     def ensure_default_admin(self):
         users = self.get_all_users()
-        has_admin = any(u.get("role") == "admin" for u in users)
+        has_admin = any(u.get("role") == UserRole.ADMIN.value for u in users)
         if has_admin:
             return
         default_pwd = os.environ.get("APP_ADMIN_PASSWORD") or "admin"
-        ok, msg = self.create_user("admin", default_pwd, role="admin")
+        ok, msg = self.create_user("admin", default_pwd, role=UserRole.ADMIN.value)
         if ok:
             logger.info("Default admin user created.")
 
     def update_user(self, user_id, fields):
         data = self.load_data()
-        users = data.get("users", [])
+        users = data.get(DataCategory.USERS.value, [])
         updated = False
         for i, u in enumerate(users):
             if u.get("id") == user_id:
@@ -398,17 +455,17 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["users"] = users
+            data[DataCategory.USERS.value] = users
             return self.save_data(data)
         return False
 
     def get_admin_users(self):
         users = self.get_all_users()
-        return [u for u in users if u.get("role") == "admin" and u.get("active", True)]
+        return [u for u in users if u.get("role") == UserRole.ADMIN.value and u.get("active", True)]
     
     def add_audit_log(self, user, action: str, detail: str):
         data = self.load_data()
-        logs = data.get("audit_logs", [])
+        logs = data.get(DataCategory.AUDIT_LOGS.value, [])
         new_id = max([l.get("id", 0) for l in logs], default=0) + 1
         entry = {
             "id": new_id,
@@ -422,12 +479,12 @@ class DataManager:
         logs.append(entry)
         if len(logs) > 1000:
             logs = logs[-1000:]
-        data["audit_logs"] = logs
+        data[DataCategory.AUDIT_LOGS.value] = logs
         return self.save_data(data)
     
     def get_audit_logs(self):
         data = self.load_data()
-        return data.get("audit_logs", [])
+        return data.get(DataCategory.AUDIT_LOGS.value, [])
     
     def get_next_project_id(self):
         """获取下一个可用的项目ID"""
@@ -436,7 +493,7 @@ class DataManager:
             return 1
         return max([p.get("id", 0) for p in projects]) + 1
     
-    def get_project(self, project_id):
+    def get_project(self, project_id: int) -> Optional[Dict[str, Any]]:
         """根据ID获取单个项目"""
         projects = self.get_all_projects()
         for project in projects:
@@ -444,29 +501,43 @@ class DataManager:
                 return project
         return None
     
-    def add_project(self, project_data):
+    def add_project(self, project_data: Union[Dict[str, Any], Project]) -> bool:
         """添加新项目"""
         data = self.load_data()
-        projects = data.get("projects", [])
+        projects = data.get(DataCategory.PROJECTS.value, [])
         
         # 生成新ID
         new_id = max([p.get("id", 0) for p in projects], default=0) + 1
-        project_data["id"] = new_id
         
-        # 确保日期是字符串格式
-        for date_field in ["start_date", "end_date"]:
-            if date_field in project_data and hasattr(project_data[date_field], 'strftime'):
-                project_data[date_field] = project_data[date_field].strftime("%Y-%m-%d")
+        if isinstance(project_data, Project):
+            project_data.id = new_id
+            # mode='json' 会将 date 对象转换为 ISO 格式字符串
+            p_dict = project_data.model_dump(mode='json')
+        else:
+            project_data["id"] = new_id
+            
+            # 确保日期是字符串格式
+            for date_field in ["start_date", "end_date"]:
+                if date_field in project_data and hasattr(project_data[date_field], 'strftime'):
+                    project_data[date_field] = project_data[date_field].strftime("%Y-%m-%d")
+            
+            # 尝试使用模型验证（不强制阻断，但建议）
+            try:
+                Project(**project_data)
+            except Exception as e:
+                logger.warning(f"Project data validation warning: {e}")
+            
+            p_dict = project_data
         
-        projects.append(project_data)
-        data["projects"] = projects
+        projects.append(p_dict)
+        data[DataCategory.PROJECTS.value] = projects
         success = self.save_data(data)
         return success
     
-    def update_project(self, project_id, updated_fields):
+    def update_project(self, project_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新项目信息"""
         data = self.load_data()
-        projects = data.get("projects", [])
+        projects = data.get(DataCategory.PROJECTS.value, [])
         
         updated = False
         for i, project in enumerate(projects):
@@ -477,15 +548,15 @@ class DataManager:
                 break
         
         if updated:
-            data["projects"] = projects
+            data[DataCategory.PROJECTS.value] = projects
             return self.save_data(data)
         return False
     
-    def delete_project(self, project_id):
+    def delete_project(self, project_id: int) -> bool:
         """根据ID删除项目"""
         try:
             data = self.load_data()
-            projects = data.get("projects", [])
+            projects = data.get(DataCategory.PROJECTS.value, [])
             
             # 记录删除前的数量
             original_count = len(projects)
@@ -495,7 +566,7 @@ class DataManager:
             
             # 检查是否真的删除了项目
             if len(new_projects) < original_count:
-                data["projects"] = new_projects
+                data[DataCategory.PROJECTS.value] = new_projects
                 success = self.save_data(data)
                 if success:
                     print(f"成功删除项目 ID: {project_id}")
@@ -511,52 +582,65 @@ class DataManager:
             return False
     
     # -------------------- 项目时间线相关方法 --------------------
-    def get_project_timeline(self, project_id):
+    def get_project_timeline(self, project_id: int) -> Optional[TimelineInfo]:
         """
         获取项目时间线信息（使用TimelineManager）
         参数:
             project_id: 项目ID
         返回:
-            时间线信息字典，如果项目不存在返回None
+            时间线信息对象，如果项目不存在返回None
         """
         # 1. 获取项目数据
         project_data = self.get_project(project_id)
         if not project_data:
-            print(f"警告: 未找到项目ID {project_id}")
+            logger.warning(f"警告: 未找到项目ID {project_id}")
             return None
         
         # 2. 使用TimelineManager进行计算
         return TimelineManager.calculate_timeline(project_data)
     
     # -------------------- 实验CRUD操作 --------------------
-    def get_all_experiments(self):
+    def get_all_experiments(self) -> List[Dict[str, Any]]:
         """获取所有实验"""
         data = self.load_data()
-        return data.get("experiments", [])
+        return data.get(DataCategory.EXPERIMENTS.value, [])
     
-    def add_experiment(self, experiment_data):
+    def add_experiment(self, experiment_data: Union[Dict[str, Any], Experiment]) -> bool:
         """添加新实验"""
         data = self.load_data()
-        experiments = data.get("experiments", [])
+        experiments = data.get(DataCategory.EXPERIMENTS.value, [])
         
         # 生成新ID
         new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
-        experiment_data["id"] = new_id
         
-        # 确保日期是字符串格式
-        for date_field in ["planned_date", "actual_date"]:
-            if date_field in experiment_data and experiment_data[date_field]:
-                if hasattr(experiment_data[date_field], 'strftime'):
-                    experiment_data[date_field] = experiment_data[date_field].strftime("%Y-%m-%d")
+        if isinstance(experiment_data, Experiment):
+            experiment_data.id = new_id
+            exp_dict = experiment_data.model_dump(mode='json')
+        else:
+            experiment_data["id"] = new_id
+            
+            # 确保日期是字符串格式
+            for date_field in ["planned_date", "actual_date"]:
+                if date_field in experiment_data and experiment_data[date_field]:
+                    if hasattr(experiment_data[date_field], 'strftime'):
+                        experiment_data[date_field] = experiment_data[date_field].strftime("%Y-%m-%d")
+            
+            # 尝试使用模型验证
+            try:
+                Experiment(**experiment_data)
+            except Exception as e:
+                logger.warning(f"Experiment data validation warning: {e}")
+                
+            exp_dict = experiment_data
         
-        experiments.append(experiment_data)
-        data["experiments"] = experiments
+        experiments.append(exp_dict)
+        data[DataCategory.EXPERIMENTS.value] = experiments
         return self.save_data(data)
     
-    def update_experiment(self, experiment_id, updated_fields):
+    def update_experiment(self, experiment_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新实验信息"""
         data = self.load_data()
-        experiments = data.get("experiments", [])
+        experiments = data.get(DataCategory.EXPERIMENTS.value, [])
         
         updated = False
         for i, exp in enumerate(experiments):
@@ -567,19 +651,19 @@ class DataManager:
                 break
         
         if updated:
-            data["experiments"] = experiments
+            data[DataCategory.EXPERIMENTS.value] = experiments
             return self.save_data(data)
         return False
     
-    def delete_experiment(self, experiment_id):
+    def delete_experiment(self, experiment_id: int) -> bool:
         """根据ID删除实验"""
         data = self.load_data()
-        experiments = data.get("experiments", [])
+        experiments = data.get(DataCategory.EXPERIMENTS.value, [])
         
         new_experiments = [e for e in experiments if e.get("id") != experiment_id]
         
         if len(new_experiments) < len(experiments):
-            data["experiments"] = new_experiments
+            data[DataCategory.EXPERIMENTS.value] = new_experiments
             return self.save_data(data)
         return False
     
@@ -588,15 +672,20 @@ class DataManager:
     def get_all_raw_materials(self):
         """获取所有原材料"""
         data = self.load_data()
-        return data.get("raw_materials", [])
+        return data.get(DataCategory.RAW_MATERIALS.value, [])
     
-    def add_raw_material(self, material_data):
+    def add_raw_material(self, material_data: Union[Dict[str, Any], RawMaterial]) -> tuple[bool, str]:
         """添加新原材料"""
         data = self.load_data()
-        materials = data.get("raw_materials", [])
+        materials = data.get(DataCategory.RAW_MATERIALS.value, [])
+        
+        # Determine name to check for duplicates
+        if isinstance(material_data, RawMaterial):
+            name = material_data.name
+        else:
+            name = material_data.get("name")
         
         # 检查名称是否重复
-        name = material_data.get("name")
         if name:
             for m in materials:
                 if m.get("name") == name:
@@ -604,20 +693,35 @@ class DataManager:
         
         # 生成新ID
         new_id = max([m.get("id", 0) for m in materials], default=0) + 1
-        material_data["id"] = new_id
-        material_data["created_date"] = datetime.now().strftime("%Y-%m-%d")
         
-        materials.append(material_data)
-        data["raw_materials"] = materials
+        if isinstance(material_data, RawMaterial):
+            material_data.id = new_id
+            if not material_data.created_date:
+                material_data.created_date = datetime.now().strftime("%Y-%m-%d")
+            mat_dict = material_data.model_dump(mode='json')
+        else:
+            material_data["id"] = new_id
+            material_data["created_date"] = datetime.now().strftime("%Y-%m-%d")
+            
+            # Try validation
+            try:
+                RawMaterial(**material_data)
+            except Exception as e:
+                logger.warning(f"RawMaterial validation warning: {e}")
+                
+            mat_dict = material_data
+        
+        materials.append(mat_dict)
+        data[DataCategory.RAW_MATERIALS.value] = materials
         if self.save_data(data):
             return True, "添加成功"
         return False, "保存失败"
     
-    def update_raw_material(self, material_id, updated_fields):
+    def update_raw_material(self, material_id: int, updated_fields: Dict[str, Any]) -> tuple[bool, str]:
         """更新原材料信息"""
         try:
             data = self.load_data()
-            materials = data.get("raw_materials", [])
+            materials = data.get(DataCategory.RAW_MATERIALS.value, [])
             
             # 验证名称唯一性
             new_name = updated_fields.get("name")
@@ -645,7 +749,7 @@ class DataManager:
                     logger.info(f"Raw material renamed from '{old_name}' to '{new_name}'. Updating references...")
                     self._update_raw_material_references(data, old_name, new_name)
                 
-                data["raw_materials"] = materials
+                data[DataCategory.RAW_MATERIALS.value] = materials
                 if self.save_data(data):
                     logger.info(f"Raw material {material_id} updated successfully.")
                     return True, "更新成功"
@@ -662,12 +766,12 @@ class DataManager:
             logger.error(f"Error updating raw material {material_id}: {e}")
             return False, msg
     
-    def _update_raw_material_references(self, data, old_name, new_name):
+    def _update_raw_material_references(self, data: Dict[str, Any], old_name: str, new_name: str) -> None:
         """更新所有引用旧原材料名称的记录"""
         try:
             count = 0
             # 1. 更新合成实验记录
-            records = data.get("synthesis_records", [])
+            records = data.get(DataCategory.SYNTHESIS_RECORDS.value, [])
             for record in records:
                 modified = False
                 # 检查所有物料列表
@@ -684,46 +788,18 @@ class DataManager:
                     record["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             # 2. 更新成品减水剂配方
-            products = data.get("products", [])
+            products = data.get(DataCategory.PRODUCTS.value, [])
             for product in products:
                 modified = False
-                composition = product.get("composition", []) # Note: In data_recording.py it is 'ingredients', checking data structure in data_manager.py... 
-                # Wait, data_recording.py uses 'ingredients'. 
-                # Let's check get_initial_data or add_product to be sure what key is used.
-                # In data_recording.py add_product: "ingredients": valid_ingredients
-                # So here it should be "ingredients" not "composition"?
-                # Let's check lines 469-480 in original file.
-                # It said: composition = product.get("composition", [])
-                # I should fix this if it's wrong.
-                
-                # Checking add_product in data_recording.py (from previous read):
-                # "ingredients": valid_ingredients
-                
-                # So "composition" might be wrong if I assumed it earlier.
-                # Let's check lines 469-480 in the current file content I read.
-                # Yes, it says composition = product.get("composition", [])
-                
-                # I should change "composition" to "ingredients" here as well to be correct.
-                # Or check both?
-                
-                # Let's use "ingredients" as seen in data_recording.py.
-                
-                ingredients = product.get("ingredients", [])
-                if ingredients:
-                    for item in ingredients:
-                        if item.get("name") == old_name:
-                            item["name"] = new_name
-                            modified = True
-                            count += 1
-                
-                # Also check "composition" for backward compatibility if needed?
-                composition = product.get("composition", [])
-                if composition:
-                     for item in composition:
-                        if item.get("name") == old_name:
-                            item["name"] = new_name
-                            modified = True
-                            count += 1
+                # Check "ingredients" (standard) and "composition" (legacy)
+                for key in ["ingredients", "composition"]:
+                    items = product.get(key, [])
+                    if items:
+                        for item in items:
+                            if item.get("name") == old_name:
+                                item["name"] = new_name
+                                modified = True
+                                count += 1
                 
                 if modified:
                     product["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -736,11 +812,11 @@ class DataManager:
         except Exception as e:
             logger.error(f"Error updating references: {e}")
     
-    def delete_raw_material(self, material_id):
+    def delete_raw_material(self, material_id: int) -> tuple[bool, str]:
         """删除原材料"""
         try:
             data = self.load_data()
-            materials = data.get("raw_materials", [])
+            materials = data.get(DataCategory.RAW_MATERIALS.value, [])
             
             # 获取要删除的原材料名称
             material_to_delete = next((m for m in materials if m.get("id") == material_id), None)
@@ -752,7 +828,7 @@ class DataManager:
             
             # 检查引用
             # 1. 检查合成实验记录
-            records = data.get("synthesis_records", [])
+            records = data.get(DataCategory.SYNTHESIS_RECORDS.value, [])
             for record in records:
                 for key in ["reactor_materials", "a_materials", "b_materials"]:
                     items = record.get(key, [])
@@ -763,7 +839,7 @@ class DataManager:
                             return False, msg
             
             # 2. 检查成品减水剂
-            products = data.get("products", [])
+            products = data.get(DataCategory.PRODUCTS.value, [])
             for product in products:
                 # 检查 ingredients
                 ingredients = product.get("ingredients", [])
@@ -784,7 +860,7 @@ class DataManager:
             new_materials = [m for m in materials if m.get("id") != material_id]
             
             if len(new_materials) < len(materials):
-                data["raw_materials"] = new_materials
+                data[DataCategory.RAW_MATERIALS.value] = new_materials
                 if self.save_data(data):
                     logger.info(f"Raw material {material_id} ({material_name}) deleted successfully.")
                     return True, "删除成功"
@@ -800,17 +876,23 @@ class DataManager:
             return False, f"系统错误: {str(e)}"
 
     # -------------------- 库存管理 (SAP Lite) --------------------
-    def add_inventory_record(self, record_data, update_master_stock=True):
+    def add_inventory_record(self, record_data: Union[Dict[str, Any], InventoryRecord], update_master_stock: bool = True) -> tuple[bool, str]:
         """添加库存变动记录"""
         try:
             data = self.load_data()
             
+            # Convert model to dict if necessary
+            if isinstance(record_data, InventoryRecord):
+                 rec_dict = record_data.model_dump(mode='json')
+            else:
+                 rec_dict = record_data
+
             # 1. Update Stock in Raw Material
-            materials = data.get("raw_materials", [])
+            materials = data.get(DataCategory.RAW_MATERIALS.value, [])
             material_found = False
             current_stock = 0.0
             
-            material_id = record_data.get("material_id")
+            material_id = rec_dict.get("material_id")
             if isinstance(material_id, str) and material_id.isdigit():
                 material_id = int(material_id)
             
@@ -825,9 +907,11 @@ class DataManager:
                         current_stock = float(m.get("stock_quantity", 0.0))
                         
                         if update_master_stock:
-                            change = float(record_data.get("quantity", 0.0))
+                            change = float(rec_dict.get("quantity", 0.0))
                             
-                            if record_data.get("type") == "out":
+                            # Use Enum or string
+                            rec_type = rec_dict.get("type")
+                            if rec_type == "out" or rec_type == StockMovementType.OUT:
                                 current_stock -= change
                             else:
                                 current_stock += change
@@ -842,16 +926,32 @@ class DataManager:
                 return False, "原材料不存在"
 
             # 2. Add Record to Ledger
-            records = data.get("inventory_records", [])
+            records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
             new_id = max([r.get("id", 0) for r in records], default=0) + 1
-            record_data["id"] = new_id
-            record_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            record_data["snapshot_stock"] = current_stock
             
-            records.append(record_data)
+            if isinstance(record_data, InventoryRecord):
+                record_data.id = new_id
+                record_data.snapshot_stock = current_stock
+                if not record_data.created_at:
+                    record_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                final_record = record_data.model_dump(mode='json')
+            else:
+                rec_dict["id"] = new_id
+                rec_dict["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                rec_dict["snapshot_stock"] = current_stock
+                
+                # Validation attempt
+                try:
+                    InventoryRecord(**rec_dict)
+                except Exception as e:
+                    logger.warning(f"InventoryRecord validation warning: {e}")
+                
+                final_record = rec_dict
             
-            data["raw_materials"] = materials
-            data["inventory_records"] = records
+            records.append(final_record)
+            
+            data[DataCategory.RAW_MATERIALS.value] = materials
+            data[DataCategory.INVENTORY_RECORDS.value] = records
             
             if self.save_data(data):
                 return True, "库存更新成功"
@@ -863,7 +963,7 @@ class DataManager:
     def get_inventory_records(self, material_id=None):
         """获取库存记录"""
         data = self.load_data()
-        records = data.get("inventory_records", [])
+        records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
         if material_id:
             if isinstance(material_id, str) and material_id.isdigit():
                 material_id = int(material_id)
@@ -874,7 +974,7 @@ class DataManager:
     def get_all_mother_liquors(self):
         """获取所有母液"""
         data = self.load_data()
-        return data.get("mother_liquors", [])
+        return data.get(DataCategory.MOTHER_LIQUORS.value, [])
     
     def get_mother_liquor(self, ml_id):
         """根据ID获取单个母液"""
@@ -884,26 +984,38 @@ class DataManager:
                 return ml
         return None
 
-    def add_mother_liquor(self, ml_data):
+    def add_mother_liquor(self, ml_data: Union[Dict[str, Any], MotherLiquor]) -> bool:
         """添加新母液"""
         data = self.load_data()
-        mls = data.get("mother_liquors", [])
+        mls = data.get(DataCategory.MOTHER_LIQUORS.value, [])
         
         # 生成新ID
         new_id = max([m.get("id", 0) for m in mls], default=0) + 1
-        ml_data["id"] = new_id
         
-        # 确保日期字符串格式 (如果需要)
-        # created_at 已经在调用端处理了，这里可以再次确认或不做处理
+        if isinstance(ml_data, MotherLiquor):
+            ml_data.id = new_id
+            if not ml_data.created_at:
+                ml_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+            final_ml = ml_data.model_dump(mode='json')
+        else:
+            ml_data["id"] = new_id
+            
+            # Validation attempt
+            try:
+                MotherLiquor(**ml_data)
+            except Exception as e:
+                logger.warning(f"MotherLiquor validation warning: {e}")
+                
+            final_ml = ml_data
         
-        mls.append(ml_data)
-        data["mother_liquors"] = mls
+        mls.append(final_ml)
+        data[DataCategory.MOTHER_LIQUORS.value] = mls
         return self.save_data(data)
 
-    def update_mother_liquor(self, ml_id, updated_fields):
+    def update_mother_liquor(self, ml_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新母液信息"""
         data = self.load_data()
-        mls = data.get("mother_liquors", [])
+        mls = data.get(DataCategory.MOTHER_LIQUORS.value, [])
         
         updated = False
         for i, ml in enumerate(mls):
@@ -915,75 +1027,92 @@ class DataManager:
                 break
         
         if updated:
-            data["mother_liquors"] = mls
+            data[DataCategory.MOTHER_LIQUORS.value] = mls
             return self.save_data(data)
         return False
 
-    def delete_mother_liquor(self, ml_id):
+    def delete_mother_liquor(self, ml_id: int) -> bool:
         """删除母液"""
         data = self.load_data()
-        mls = data.get("mother_liquors", [])
+        mls = data.get(DataCategory.MOTHER_LIQUORS.value, [])
         
         new_mls = [m for m in mls if m.get("id") != ml_id]
         
         if len(new_mls) < len(mls):
-            data["mother_liquors"] = new_mls
+            data[DataCategory.MOTHER_LIQUORS.value] = new_mls
             return self.save_data(data)
         return False
     
     # -------------------- 合成实验记录CRUD操作 --------------------
-    def get_synthesis_experiment(self, exp_id):
+    def get_synthesis_experiment(self, exp_id: int) -> Optional[Dict[str, Any]]:
         """获取单个合成实验记录"""
         data = self.load_data()
-        records = data.get("synthesis_records", [])
+        records = data.get(DataCategory.SYNTHESIS_RECORDS.value, [])
         for record in records:
             if record.get("id") == exp_id:
                 return record
         return None
 
-    def get_all_synthesis_experiments(self):
+    def get_all_synthesis_experiments(self) -> List[Dict[str, Any]]:
         """获取所有合成实验（别名方法，兼容调用）"""
         return self.get_all_synthesis_records()
         
-    def get_all_synthesis_records(self):
+    def get_all_synthesis_records(self) -> List[Dict[str, Any]]:
         """获取所有合成实验记录"""
         data = self.load_data()
-        return data.get("synthesis_records", [])
+        return data.get(DataCategory.SYNTHESIS_RECORDS.value, [])
     
-    def add_synthesis_record(self, record_data):
+    def add_synthesis_record(self, record_data: Union[Dict[str, Any], SynthesisRecord]) -> bool:
         """添加新合成实验记录"""
         data = self.load_data()
-        records = data.get("synthesis_records", [])
+        records = data.get(DataCategory.SYNTHESIS_RECORDS.value, [])
         
         # 生成新ID
         new_id = max([r.get("id", 0) for r in records], default=0) + 1
-        record_data["id"] = new_id
-        record_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        record_data["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        records.append(record_data)
-        data["synthesis_records"] = records
+        if isinstance(record_data, SynthesisRecord):
+            record_data.id = new_id
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if not record_data.created_at:
+                record_data.created_at = now_str
+            record_data.last_modified = now_str
+            rec_dict = record_data.model_dump(mode='json')
+        else:
+            record_data["id"] = new_id
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            record_data["created_at"] = now_str
+            record_data["last_modified"] = now_str
+            
+            try:
+                SynthesisRecord(**record_data)
+            except Exception as e:
+                logger.warning(f"SynthesisRecord validation warning: {e}")
+                
+            rec_dict = record_data
+        
+        records.append(rec_dict)
+        data[DataCategory.SYNTHESIS_RECORDS.value] = records
         return self.save_data(data)
     
-    def delete_synthesis_record(self, record_id):
+    def delete_synthesis_record(self, record_id: int) -> bool:
         """删除合成实验记录"""
         data = self.load_data()
-        records = data.get("synthesis_records", [])
+        records = data.get(DataCategory.SYNTHESIS_RECORDS.value, [])
         
         new_records = [r for r in records if r.get("id") != record_id]
         
         if len(new_records) < len(records):
-            data["synthesis_records"] = new_records
+            data[DataCategory.SYNTHESIS_RECORDS.value] = new_records
             return self.save_data(data)
         return False
     
     # 成品减水剂
-    def get_all_products(self):
+    def get_all_products(self) -> List[Dict[str, Any]]:
         """获取所有成品减水剂"""
         data = self.load_data()
-        return data.get("products", [])
+        return data.get(DataCategory.PRODUCTS.value, [])
 
-    def check_product_name_exists(self, name, exclude_id=None):
+    def check_product_name_exists(self, name: str, exclude_id: Optional[int] = None) -> bool:
         """检查成品名称是否已存在（不区分大小写）"""
         products = self.get_all_products()
         name = name.strip().lower()
@@ -994,37 +1123,56 @@ class DataManager:
                 return True
         return False
     
-    def add_product(self, product_data):
+    def add_product(self, product_data: Union[Dict[str, Any], Product]) -> bool:
         """添加新成品减水剂"""
+        
+        if isinstance(product_data, Product):
+            p_name = product_data.product_name
+        else:
+            p_name = product_data.get("product_name", "")
+            
         # 检查名称唯一性
-        if self.check_product_name_exists(product_data.get("product_name", "")):
-             raise ValueError(f"成品名称 '{product_data.get('product_name')}' 已存在")
+        if self.check_product_name_exists(p_name):
+             raise ValueError(f"成品名称 '{p_name}' 已存在")
 
         data = self.load_data()
-        products = data.get("products", [])
+        products = data.get(DataCategory.PRODUCTS.value, [])
         
         # 生成新ID
         new_id = max([p.get("id", 0) for p in products], default=0) + 1
-        product_data["id"] = new_id
-        product_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        products.append(product_data)
-        data["products"] = products
+        if isinstance(product_data, Product):
+            product_data.id = new_id
+            product_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            prod_dict = product_data.model_dump(mode='json')
+        else:
+            product_data["id"] = new_id
+            product_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                Product(**product_data)
+            except Exception as e:
+                logger.warning(f"Product validation warning: {e}")
+                
+            prod_dict = product_data
+        
+        products.append(prod_dict)
+        data[DataCategory.PRODUCTS.value] = products
         return self.save_data(data)
     
-    def delete_product(self, product_id):
+    def delete_product(self, product_id: int) -> bool:
         """删除成品减水剂"""
         data = self.load_data()
-        products = data.get("products", [])
+        products = data.get(DataCategory.PRODUCTS.value, [])
         
         new_products = [p for p in products if p.get("id") != product_id]
         
         if len(new_products) < len(products):
-            data["products"] = new_products
+            data[DataCategory.PRODUCTS.value] = new_products
             return self.save_data(data)
         return False
 
-    def update_product(self, product_id, updated_fields):
+    def update_product(self, product_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新成品减水剂"""
         # 如果更新了名称，检查唯一性
         if "product_name" in updated_fields:
@@ -1032,7 +1180,7 @@ class DataManager:
                  raise ValueError(f"成品名称 '{updated_fields['product_name']}' 已存在")
 
         data = self.load_data()
-        products = data.get("products", [])
+        products = data.get(DataCategory.PRODUCTS.value, [])
         updated = False
         for i, product in enumerate(products):
             if product.get("id") == product_id:
@@ -1046,7 +1194,7 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["products"] = products
+            data[DataCategory.PRODUCTS.value] = products
             return self.save_data(data)
         return False
 
@@ -1055,28 +1203,45 @@ class DataManager:
     def get_all_boms(self):
         """获取所有BOM主数据"""
         data = self.load_data()
-        return data.get("boms", [])
+        return data.get(DataCategory.BOMS.value, [])
 
-    def add_bom(self, bom_data):
+    def add_bom(self, bom_data: Union[Dict[str, Any], BOM]) -> Optional[int]:
         """添加BOM主数据"""
         data = self.load_data()
-        boms = data.get("boms", [])
+        boms = data.get(DataCategory.BOMS.value, [])
         
         new_id = max([b.get("id", 0) for b in boms], default=0) + 1
-        bom_data["id"] = new_id
-        bom_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        bom_data["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        boms.append(bom_data)
-        data["boms"] = boms
+        if isinstance(bom_data, BOM):
+            bom_data.id = new_id
+            if not bom_data.created_at:
+                bom_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if not bom_data.last_modified:
+                bom_data.last_modified = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            final_bom = bom_data.model_dump(mode='json')
+        else:
+            bom_data["id"] = new_id
+            if "created_at" not in bom_data:
+                bom_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if "last_modified" not in bom_data:
+                bom_data["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                BOM(**bom_data)
+            except Exception as e:
+                logger.warning(f"BOM validation warning: {e}")
+            final_bom = bom_data
+        
+        boms.append(final_bom)
+        data[DataCategory.BOMS.value] = boms
         if self.save_data(data):
             return new_id
         return None
 
-    def update_bom(self, bom_id, updated_fields):
+    def update_bom(self, bom_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新BOM主数据"""
         data = self.load_data()
-        boms = data.get("boms", [])
+        boms = data.get(DataCategory.BOMS.value, [])
         updated = False
         for i, bom in enumerate(boms):
             if bom.get("id") == bom_id:
@@ -1085,40 +1250,40 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["boms"] = boms
+            data[DataCategory.BOMS.value] = boms
             return self.save_data(data)
         return False
         
-    def delete_bom(self, bom_id):
+    def delete_bom(self, bom_id: int) -> bool:
         """删除BOM（软删除或硬删除，这里做硬删除但要检查版本）"""
         # 实际业务中建议检查是否有生产单引用
         data = self.load_data()
-        boms = data.get("boms", [])
-        versions = data.get("bom_versions", [])
+        boms = data.get(DataCategory.BOMS.value, [])
+        versions = data.get(DataCategory.BOM_VERSIONS.value, [])
         
         # 级联删除版本
         new_versions = [v for v in versions if v.get("bom_id") != bom_id]
         new_boms = [b for b in boms if b.get("id") != bom_id]
         
         if len(new_boms) < len(boms):
-            data["boms"] = new_boms
-            data["bom_versions"] = new_versions
+            data[DataCategory.BOMS.value] = new_boms
+            data[DataCategory.BOM_VERSIONS.value] = new_versions
             return self.save_data(data)
         return False
 
-    def get_bom_versions(self, bom_id):
+    def get_bom_versions(self, bom_id: int) -> List[Dict[str, Any]]:
         """获取指定BOM的所有版本"""
         data = self.load_data()
-        versions = data.get("bom_versions", [])
+        versions = data.get(DataCategory.BOM_VERSIONS.value, [])
         return [v for v in versions if v.get("bom_id") == bom_id]
 
-    def get_all_bom_versions(self):
+    def get_all_bom_versions(self) -> List[Dict[str, Any]]:
         data = self.load_data()
-        return data.get("bom_versions", [])
+        return data.get(DataCategory.BOM_VERSIONS.value, [])
 
-    def get_effective_bom_version(self, bom_id, as_of_date=None):
+    def get_effective_bom_version(self, bom_id: int, as_of_date: Optional[date] = None) -> Optional[Dict[str, Any]]:
         """根据生效日期获取指定BOM在某一时点的有效版本
-
+        
         策略:
         - 只考虑有明细行的版本
         - 只考虑 effective_from 不晚于 as_of_date 的版本
@@ -1127,17 +1292,16 @@ class DataManager:
         versions = self.get_bom_versions(bom_id)
         if not versions:
             return None
-        import datetime as _dt
 
         if as_of_date is None:
-            as_of_date = _dt.date.today()
+            as_of_date = datetime.now().date()
 
         def _parse_date(v):
             d = v.get("effective_from")
             if not d:
                 return None
             try:
-                return _dt.datetime.strptime(str(d), "%Y-%m-%d").date()
+                return datetime.strptime(str(d), "%Y-%m-%d").date()
             except Exception:
                 return None
 
@@ -1168,10 +1332,10 @@ class DataManager:
         candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
         return candidates[0][2]
 
-    def add_bom_version(self, version_data):
+    def add_bom_version(self, version_data: Union[Dict[str, Any], BOMVersion]) -> Optional[int]:
         """添加BOM版本"""
         data = self.load_data()
-        versions = data.get("bom_versions", [])
+        versions = data.get(DataCategory.BOM_VERSIONS.value, [])
         
         user = None
         try:
@@ -1179,29 +1343,55 @@ class DataManager:
         except Exception:
             user = None
 
-        if "status" not in version_data:
-            if user and user.get("role") == "admin":
-                version_data["status"] = "approved"
-            else:
-                version_data["status"] = "pending"
-        if user and "created_by" not in version_data:
-            version_data["created_by"] = user.get("username")
-            version_data["created_role"] = user.get("role")
-
         new_id = max([v.get("id", 0) for v in versions], default=0) + 1
-        version_data["id"] = new_id
-        version_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        versions.append(version_data)
-        data["bom_versions"] = versions
+        if isinstance(version_data, BOMVersion):
+            version_data.id = new_id
+            if not version_data.created_at:
+                version_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            if user:
+                if not version_data.created_by:
+                    version_data.created_by = user.get("username")
+            
+            # Admin auto-approve logic
+            if version_data.status == BOMStatus.PENDING:
+                 if user and user.get("role") == UserRole.ADMIN.value:
+                      version_data.status = BOMStatus.ACTIVE
+
+            final_ver = version_data.model_dump(mode='json')
+            if user:
+                final_ver["created_role"] = user.get("role")
+        else:
+            if "status" not in version_data:
+                if user and user.get("role") == UserRole.ADMIN.value:
+                    version_data["status"] = BOMStatus.ACTIVE.value
+                else:
+                    version_data["status"] = BOMStatus.PENDING.value
+            if user and "created_by" not in version_data:
+                version_data["created_by"] = user.get("username")
+                version_data["created_role"] = user.get("role")
+
+            version_data["id"] = new_id
+            if "created_at" not in version_data:
+                version_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                BOMVersion(**version_data)
+            except Exception as e:
+                logger.warning(f"BOMVersion validation warning: {e}")
+            final_ver = version_data
+        
+        versions.append(final_ver)
+        data[DataCategory.BOM_VERSIONS.value] = versions
         if self.save_data(data):
             return new_id
         return None
 
-    def update_bom_version(self, version_id, updated_fields):
+    def update_bom_version(self, version_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新BOM版本"""
         data = self.load_data()
-        versions = data.get("bom_versions", [])
+        versions = data.get(DataCategory.BOM_VERSIONS.value, [])
         updated = False
         for i, v in enumerate(versions):
             if v.get("id") == version_id:
@@ -1209,14 +1399,14 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["bom_versions"] = versions
+            data[DataCategory.BOM_VERSIONS.value] = versions
             return self.save_data(data)
         return False
 
-    def delete_bom_version(self, version_id):
+    def delete_bom_version(self, version_id: int) -> Tuple[bool, str]:
         data = self.load_data()
-        versions = data.get("bom_versions", [])
-        orders = data.get("production_orders", [])
+        versions = data.get(DataCategory.BOM_VERSIONS.value, [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
         target = None
         for v in versions:
             if v.get("id") == version_id:
@@ -1228,12 +1418,12 @@ class DataManager:
             if o.get("bom_version_id") == version_id:
                 return False, "存在引用该版本的生产单，无法删除"
         new_versions = [v for v in versions if v.get("id") != version_id]
-        data["bom_versions"] = new_versions
+        data[DataCategory.BOM_VERSIONS.value] = new_versions
         if self.save_data(data):
             return True, "删除成功"
         return False, "保存失败"
 
-    def explode_bom(self, bom_version_id, target_qty=1000.0):
+    def explode_bom(self, bom_version_id: Union[int, str], target_qty: float = 1000.0) -> List[Dict[str, Any]]:
         """
         BOM 展开计算
         Args:
@@ -1243,7 +1433,7 @@ class DataManager:
             list: [{item_id, item_name, item_type, required_qty, uom, ...}]
         """
         data = self.load_data()
-        versions = data.get("bom_versions", [])
+        versions = data.get(DataCategory.BOM_VERSIONS.value, [])
         
         # 兼容 ID 类型比较 (int vs str)
         target_version = None
@@ -1277,7 +1467,7 @@ class DataManager:
                 "item_id": item_id,
                 "item_type": item_type,
                 "required_qty": qty,
-                "uom": line.get("uom", "kg"),
+                "uom": line.get("uom", UnitType.KG.value),
                 "phase": line.get("phase", ""),
                 "item_name": line.get("item_name", "Unknown")
             }
@@ -1287,10 +1477,10 @@ class DataManager:
         return result
     
     # -------------------- 生产与库存扩展 (M3) --------------------
-    def get_stock_balance(self, material_id=None):
+    def get_stock_balance(self, material_id: Optional[int] = None) -> Union[float, Dict[int, float]]:
         """获取库存余额（通过汇总台账）"""
         data = self.load_data()
-        records = data.get("inventory_records", [])
+        records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
         
         # 如果指定了 material_id，只计算该物料
         if material_id:
@@ -1299,9 +1489,9 @@ class DataManager:
                 if r.get("material_id") == material_id:
                     qty = float(r.get("quantity", 0.0))
                     rtype = r.get("type", "")
-                    if rtype in ["in", "produce_in", "adjust_in", "return_in"]:
+                    if rtype in [StockMovementType.IN.value, StockMovementType.PRODUCE_IN.value, StockMovementType.ADJUST_IN.value, StockMovementType.RETURN_IN.value]:
                         balance += qty
-                    elif rtype in ["out", "consume_out", "adjust_out"]:
+                    elif rtype in [StockMovementType.OUT.value, StockMovementType.CONSUME_OUT.value, StockMovementType.ADJUST_OUT.value]:
                         balance -= qty
             return balance
         
@@ -1313,31 +1503,45 @@ class DataManager:
             
             qty = float(r.get("quantity", 0.0))
             rtype = r.get("type", "")
-            if rtype in ["in", "produce_in", "adjust_in", "return_in"]:
+            if rtype in [StockMovementType.IN.value, StockMovementType.PRODUCE_IN.value, StockMovementType.ADJUST_IN.value, StockMovementType.RETURN_IN.value]:
                 balances[mid] += qty
-            elif rtype in ["out", "consume_out", "adjust_out"]:
+            elif rtype in [StockMovementType.OUT.value, StockMovementType.CONSUME_OUT.value, StockMovementType.ADJUST_OUT.value]:
                 balances[mid] -= qty
         return balances
 
-    def add_production_order(self, order_data):
+    def add_production_order(self, order_data: Union[Dict[str, Any], ProductionOrder]) -> Optional[int]:
         """添加生产单"""
         data = self.load_data()
-        orders = data.get("production_orders", [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
         
         new_id = max([o.get("id", 0) for o in orders], default=0) + 1
-        order_data["id"] = new_id
-        order_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        orders.append(order_data)
-        data["production_orders"] = orders
+        if isinstance(order_data, ProductionOrder):
+            order_data.id = new_id
+            if not order_data.created_at:
+                order_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            final_order = order_data.model_dump(mode='json')
+        else:
+            order_data["id"] = new_id
+            if "created_at" not in order_data:
+                order_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                ProductionOrder(**order_data)
+            except Exception as e:
+                logger.warning(f"ProductionOrder validation warning: {e}")
+            final_order = order_data
+        
+        orders.append(final_order)
+        data[DataCategory.PRODUCTION_ORDERS.value] = orders
         if self.save_data(data):
             return new_id
         return None
 
-    def update_production_order(self, order_id, updated_fields):
+    def update_production_order(self, order_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新生产单"""
         data = self.load_data()
-        orders = data.get("production_orders", [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
         updated = False
         for i, order in enumerate(orders):
             if order.get("id") == order_id:
@@ -1346,24 +1550,24 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["production_orders"] = orders
+            data[DataCategory.PRODUCTION_ORDERS.value] = orders
             return self.save_data(data)
         return False
         
-    def get_all_production_orders(self):
+    def get_all_production_orders(self) -> List[Dict[str, Any]]:
         """获取所有生产单"""
         data = self.load_data()
-        return data.get("production_orders", [])
+        return data.get(DataCategory.PRODUCTION_ORDERS.value, [])
 
-    def get_production_orders(self):
+    def get_production_orders(self) -> List[Dict[str, Any]]:
         """获取所有生产单（别名方法，兼容调用）"""
         return self.get_all_production_orders()
 
-    def delete_production_order(self, order_id):
+    def delete_production_order(self, order_id: int) -> Tuple[bool, str]:
         """删除生产单（及其关联的领料单）"""
         data = self.load_data()
-        orders = data.get("production_orders", [])
-        issues = data.get("material_issues", [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
+        issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
         
         # 检查是否可以删除
         order = next((o for o in orders if o.get("id") == order_id), None)
@@ -1372,7 +1576,7 @@ class DataManager:
         # 如果已经有领料单过账，则不允许删除
         related_issues = [i for i in issues if i.get("production_order_id") == order_id]
         for issue in related_issues:
-            if issue.get("status") == "posted":
+            if issue.get("status") == IssueStatus.POSTED.value:
                 return False, "无法删除：存在已过账的领料单"
         
         # 删除生产单
@@ -1381,14 +1585,14 @@ class DataManager:
         new_issues = [i for i in issues if i.get("production_order_id") != order_id]
         
         if len(new_orders) < len(orders):
-            data["production_orders"] = new_orders
-            data["material_issues"] = new_issues
+            data[DataCategory.PRODUCTION_ORDERS.value] = new_orders
+            data[DataCategory.MATERIAL_ISSUES.value] = new_issues
             if self.save_data(data):
                 return True, "删除成功"
             return False, "保存失败"
         return False, "删除未生效"
 
-    def finish_production_order(self, order_id, operator="User"):
+    def finish_production_order(self, order_id: int, operator: str = "User") -> Tuple[bool, str]:
         """
         完工入库：
         1. 更新生产单状态为 finished
@@ -1396,10 +1600,10 @@ class DataManager:
         3. 记录成品入库流水
         """
         data = self.load_data()
-        orders = data.get("production_orders", [])
-        inventory = data.get("product_inventory", [])
-        records = data.get("product_inventory_records", [])
-        boms = data.get("boms", [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
+        inventory = data.get(DataCategory.PRODUCT_INVENTORY.value, [])
+        records = data.get(DataCategory.PRODUCT_INVENTORY_RECORDS.value, [])
+        boms = data.get(DataCategory.BOMS.value, [])
         
         target_order = None
         target_idx = -1
@@ -1410,7 +1614,7 @@ class DataManager:
                 break
         
         if not target_order: return False, "生产单不存在"
-        if target_order.get("status") == "finished": return False, "生产单已完工"
+        if target_order.get("status") == ProductionOrderStatus.FINISHED.value: return False, "生产单已完工"
         
         # 获取计划产量 (这里简化为实际产量=计划产量，实际应用可能需要输入实际产量)
         plan_qty = float(target_order.get("plan_qty", 0.0))
@@ -1495,7 +1699,7 @@ class DataManager:
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "product_name": inventory[target_prod_idx]["name"], # 使用库存中实际的产品名称，确保关联正确
             "product_type": product_type,
-            "type": "produce_in", # 明确标记为生产入库
+            "type": StockMovementType.PRODUCE_IN.value, # 明确标记为生产入库
             "quantity": final_qty,
             "reason": f"生产完工: {target_order.get('order_code')}",
             "operator": operator,
@@ -1504,25 +1708,25 @@ class DataManager:
         })
         
         # 更新订单状态
-        orders[target_idx]["status"] = "finished"
+        orders[target_idx]["status"] = ProductionOrderStatus.FINISHED.value
         orders[target_idx]["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        data["production_orders"] = orders
-        data["product_inventory"] = inventory
-        data["product_inventory_records"] = records
+        data[DataCategory.PRODUCTION_ORDERS.value] = orders
+        data[DataCategory.PRODUCT_INVENTORY.value] = inventory
+        data[DataCategory.PRODUCT_INVENTORY_RECORDS.value] = records
         
         if self.save_data(data):
             return True, f"完工入库成功，库存增加 {final_qty:.3f} {prod_unit}"
         return False, "保存失败"
 
-    def create_issue_from_order(self, order_id):
+    def create_issue_from_order(self, order_id: int) -> Optional[int]:
         """
         根据生产单创建领料单（建议）
         Returns:
             int: 新领料单ID
         """
         data = self.load_data()
-        orders = data.get("production_orders", [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
         order = next((o for o in orders if o.get("id") == order_id), None)
         
         if not order: return None
@@ -1535,7 +1739,7 @@ class DataManager:
         # 2. 展开 BOM（若无明细，回退到最近有效版本）
         lines = self.explode_bom(bom_version_id, plan_qty)
         if not lines:
-            versions = data.get("bom_versions", [])
+            versions = data.get(DataCategory.BOM_VERSIONS.value, [])
             same_bom_versions = []
             for v in versions:
                 if str(v.get("bom_id")) != str(bom_id):
@@ -1556,49 +1760,49 @@ class DataManager:
                         orders[i]["bom_version_id"] = fallback_ver["id"]
                         orders[i]["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         break
-                data["production_orders"] = orders
+                data[DataCategory.PRODUCTION_ORDERS.value] = orders
                 # 重新展开
                 lines = self.explode_bom(fallback_ver["id"], plan_qty)
             else:
                 return None
         
         # 3. 生成领料单
-        issues = data.get("material_issues", [])
+        issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
         new_id = max([i.get("id", 0) for i in issues], default=0) + 1
         
         # 确保行项目包含 item_type
         for line in lines:
             if "item_type" not in line:
-                line["item_type"] = "raw_material" # 默认值，兼容旧数据
+                line["item_type"] = MaterialType.RAW_MATERIAL.value # 默认值，兼容旧数据
         
         issue_data = {
             "id": new_id,
             "issue_code": f"ISS-{datetime.now().strftime('%Y%m%d')}-{new_id:04d}",
             "production_order_id": order_id,
-            "status": "draft",
+            "status": IssueStatus.DRAFT.value,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "lines": lines  # 直接使用展开的行作为建议领料行
         }
         
         issues.append(issue_data)
-        data["material_issues"] = issues
+        data[DataCategory.MATERIAL_ISSUES.value] = issues
         
         if self.save_data(data):
             return new_id
         return None
 
-    def get_material_issues(self, order_id=None):
+    def get_material_issues(self, order_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """获取领料单"""
         data = self.load_data()
-        issues = data.get("material_issues", [])
+        issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
         if order_id:
             return [i for i in issues if i.get("production_order_id") == order_id]
         return issues
         
-    def update_material_issue(self, issue_id, updated_fields):
+    def update_material_issue(self, issue_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新领料单（通常是更新实发数量）"""
         data = self.load_data()
-        issues = data.get("material_issues", [])
+        issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
         updated = False
         for i, issue in enumerate(issues):
             if issue.get("id") == issue_id:
@@ -1606,11 +1810,11 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["material_issues"] = issues
+            data[DataCategory.MATERIAL_ISSUES.value] = issues
             return self.save_data(data)
         return False
 
-    def post_issue(self, issue_id, operator="System"):
+    def post_issue(self, issue_id: int, operator: str = "System") -> Tuple[bool, str]:
         """
         领料过账：
         1. 锁定领料单 status=posted
@@ -1618,8 +1822,8 @@ class DataManager:
         3. 更新库存 (支持原材料和产品)
         """
         data = self.load_data()
-        issues = data.get("material_issues", [])
-        orders = data.get("production_orders", [])
+        issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
         target_issue = None
         for issue in issues:
             if issue.get("id") == issue_id:
@@ -1627,15 +1831,15 @@ class DataManager:
                 break
         
         if not target_issue: return False, "领料单不存在"
-        if target_issue.get("status") == "posted": return False, "领料单已过账"
+        if target_issue.get("status") == IssueStatus.POSTED.value: return False, "领料单已过账"
         if not target_issue.get("lines"):
             return False, "领料单没有明细，无法过账"
         
         # 准备批量写入台账
-        records = data.get("inventory_records", [])
-        product_records = data.get("product_inventory_records", [])
-        materials = data.get("raw_materials", [])
-        products = data.get("product_inventory", [])
+        records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
+        product_records = data.get(DataCategory.PRODUCT_INVENTORY_RECORDS.value, [])
+        materials = data.get(DataCategory.RAW_MATERIALS.value, [])
+        products = data.get(DataCategory.PRODUCT_INVENTORY.value, [])
         
         # 遍历行项目
         for line in target_issue.get("lines", []):
@@ -1643,10 +1847,10 @@ class DataManager:
             if qty <= 0: continue
             
             mid = line.get("item_id")
-            line_uom = line.get("uom", "kg")
-            item_type = line.get("item_type", "raw_material")
+            line_uom = line.get("uom", UnitType.KG.value)
+            item_type = line.get("item_type", MaterialType.RAW_MATERIAL.value)
             
-            if item_type == "product":
+            if item_type == MaterialType.PRODUCT.value:
                 current_stock = 0.0
                 prod_idx = -1
                 expected_name = str(line.get("item_name", "") or "").strip()
@@ -1763,7 +1967,7 @@ class DataManager:
                     "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "product_name": products[prod_idx]["name"],
                     "product_type": products[prod_idx].get("type", "其他"),
-                    "type": "consume_out", # 标记为生产消耗
+                    "type": StockMovementType.CONSUME_OUT.value, # 标记为生产消耗
                     "quantity": final_qty,
                     "reason": reason_note,
                     "operator": operator,
@@ -1791,7 +1995,7 @@ class DataManager:
                 
                 if mat_idx >= 0:
                     # 单位转换
-                    stock_unit = materials[mat_idx].get("unit", "kg")
+                    stock_unit = materials[mat_idx].get("unit", UnitType.KG.value)
                     final_qty, success = convert_quantity(qty, line_uom, stock_unit)
                     
                     if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
@@ -1814,7 +2018,7 @@ class DataManager:
                         "date": datetime.now().strftime("%Y-%m-%d"),
                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "material_id": mid,
-                        "type": "consume_out",
+                        "type": StockMovementType.CONSUME_OUT.value,
                         "quantity": final_qty,
                         "reason": reason_note,
                         "operator": operator,
@@ -1824,7 +2028,7 @@ class DataManager:
                     })
         
         # 更新领料单状态
-        target_issue["status"] = "posted"
+        target_issue["status"] = IssueStatus.POSTED.value
         target_issue["posted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         data["inventory_records"] = records
@@ -1837,7 +2041,7 @@ class DataManager:
             return True, "过账成功"
         return False, "保存失败"
 
-    def cancel_issue_posting(self, issue_id, operator="System"):
+    def cancel_issue_posting(self, issue_id: int, operator: str = "System") -> Tuple[bool, str]:
         """
         撤销领料过账：
         1. 检查状态是否为 posted
@@ -1846,10 +2050,10 @@ class DataManager:
         4. 状态回滚为 draft
         """
         data = self.load_data()
-        issues = data.get("material_issues", [])
-        orders = data.get("production_orders", [])
-        products = data.get("product_inventory", [])
-        product_records = data.get("product_inventory_records", [])
+        issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
+        products = data.get(DataCategory.PRODUCT_INVENTORY.value, [])
+        product_records = data.get(DataCategory.PRODUCT_INVENTORY_RECORDS.value, [])
         target_issue = None
         for issue in issues:
             if issue.get("id") == issue_id:
@@ -1857,10 +2061,10 @@ class DataManager:
                 break
         
         if not target_issue: return False, "领料单不存在"
-        if target_issue.get("status") != "posted": return False, "只有已过账的领料单可以撤销"
+        if target_issue.get("status") != IssueStatus.POSTED.value: return False, "只有已过账的领料单可以撤销"
         
-        records = data.get("inventory_records", [])
-        materials = data.get("raw_materials", [])
+        records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
+        materials = data.get(DataCategory.RAW_MATERIALS.value, [])
         
         # 遍历行项目进行回滚
         for line in target_issue.get("lines", []):
@@ -1868,9 +2072,9 @@ class DataManager:
             if qty <= 0: continue
             
             mid = line.get("item_id")
-            line_uom = line.get("uom", "kg")
-            item_type = line.get("item_type", "raw_material")
-            if item_type == "product":
+            line_uom = line.get("uom", UnitType.KG.value)
+            item_type = line.get("item_type", MaterialType.RAW_MATERIAL.value)
+            if item_type == MaterialType.PRODUCT.value:
                 prod_idx = -1
                 current_stock = 0.0
                 expected_name = str(line.get("item_name", "") or "").strip()
@@ -1897,7 +2101,7 @@ class DataManager:
                             current_stock = float(p.get("stock_quantity", 0.0))
                             break
                 if prod_idx >= 0:
-                    stock_unit = products[prod_idx].get("unit", "吨")
+                    stock_unit = products[prod_idx].get("unit", UnitType.TON.value)
                     final_qty, success = convert_quantity(qty, line_uom, stock_unit)
                     if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
                         logger.warning(f"Unit conversion failed in cancel_issue (product): {qty} {line_uom} -> {stock_unit}")
@@ -1923,7 +2127,7 @@ class DataManager:
                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "product_name": products[prod_idx].get("name"),
                         "product_type": products[prod_idx].get("type", "其他"),
-                        "type": "return_in",
+                        "type": StockMovementType.RETURN_IN.value,
                         "quantity": final_qty,
                         "reason": reason_note,
                         "operator": operator,
@@ -1950,7 +2154,7 @@ class DataManager:
                         break
                 
                 if mat_idx >= 0:
-                    stock_unit = materials[mat_idx].get("unit", "kg")
+                    stock_unit = materials[mat_idx].get("unit", UnitType.KG.value)
                     final_qty, success = convert_quantity(qty, line_uom, stock_unit)
 
                     if not success and normalize_unit(line_uom) != normalize_unit(stock_unit):
@@ -1972,7 +2176,7 @@ class DataManager:
                         "date": datetime.now().strftime("%Y-%m-%d"),
                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "material_id": mid,
-                        "type": "return_in",
+                        "type": StockMovementType.RETURN_IN.value,
                         "quantity": final_qty,
                         "reason": reason_note,
                         "operator": operator,
@@ -1982,13 +2186,13 @@ class DataManager:
                     })
         
         # 状态回滚
-        target_issue["status"] = "draft"
+        target_issue["status"] = IssueStatus.DRAFT.value
         target_issue["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # 标记此前与该领料单关联的成品出库记录为已撤销
         for r in product_records:
             if (
-                r.get("type") == "out"
+                r.get("type") == StockMovementType.OUT.value
                 and r.get("related_doc_type") == "ISSUE"
                 and r.get("related_doc_id") == issue_id
             ):
@@ -1997,23 +2201,23 @@ class DataManager:
                     r["reason"] = f"{r['reason']} (已撤销)"
                 else:
                     r["reason"] = "生产领料出库 (已撤销)"
-        data["inventory_records"] = records
-        data["raw_materials"] = materials
-        data["product_inventory"] = products
-        data["product_inventory_records"] = product_records
+        data[DataCategory.INVENTORY_RECORDS.value] = records
+        data[DataCategory.RAW_MATERIALS.value] = materials
+        data[DataCategory.PRODUCT_INVENTORY.value] = products
+        data[DataCategory.PRODUCT_INVENTORY_RECORDS.value] = product_records
         
         if self.save_data(data):
             return True, "撤销成功，库存已恢复"
         return False, "保存失败"
     
-    def repair_material_issues(self):
+    def repair_material_issues(self) -> bool:
         data = self.load_data()
-        issues = data.get("material_issues", [])
-        orders = data.get("production_orders", [])
-        versions = data.get("bom_versions", [])
+        issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
+        orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
+        versions = data.get(DataCategory.BOM_VERSIONS.value, [])
         updated = False
         for i, issue in enumerate(issues):
-            if issue.get("status") != "draft":
+            if issue.get("status") != IssueStatus.DRAFT.value:
                 continue
             oid = issue.get("production_order_id")
             order = next((o for o in orders if o.get("id") == oid), None)
@@ -2029,7 +2233,7 @@ class DataManager:
                     if str(v.get("bom_id")) != str(bom_id):
                         continue
                     status = v.get("status")
-                    if status in ["pending", "rejected"]:
+                    if status in [BOMStatus.PENDING.value, BOMStatus.REJECTED.value]:
                         continue
                     same_bom_versions.append(v)
                 fallback_ver = None
@@ -2043,56 +2247,70 @@ class DataManager:
                             orders[j]["bom_version_id"] = fallback_ver["id"]
                             orders[j]["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             break
-                    data["production_orders"] = orders
+                    data[DataCategory.PRODUCTION_ORDERS.value] = orders
                     lines = self.explode_bom(fallback_ver["id"], plan_qty)
             if lines:
                 for line in lines:
                     if "item_type" not in line:
-                        line["item_type"] = "raw_material"
+                        line["item_type"] = MaterialType.RAW_MATERIAL.value
                 issues[i]["lines"] = lines
                 issues[i]["last_modified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 updated = True
         if updated:
-            data["material_issues"] = issues
+            data[DataCategory.MATERIAL_ISSUES.value] = issues
             return self.save_data(data)
         return True
         
     # 净浆实验
-    def get_all_paste_experiments(self):
+    def get_all_paste_experiments(self) -> List[Dict[str, Any]]:
         """获取所有净浆实验"""
         data = self.load_data()
-        return data.get("paste_experiments", [])
+        return data.get(DataCategory.PASTE_EXPERIMENTS.value, [])
     
-    def add_paste_experiment(self, experiment_data):
+    def add_paste_experiment(self, experiment_data: Union[Dict[str, Any], PasteExperiment]) -> bool:
         """添加新净浆实验"""
         data = self.load_data()
-        experiments = data.get("paste_experiments", [])
+        experiments = data.get(DataCategory.PASTE_EXPERIMENTS.value, [])
         
         # 生成新ID
         new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
-        experiment_data["id"] = new_id
-        experiment_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        experiments.append(experiment_data)
-        data["paste_experiments"] = experiments
+        if isinstance(experiment_data, PasteExperiment):
+            experiment_data.id = new_id
+            if not experiment_data.created_at:
+                experiment_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            exp_dict = experiment_data.model_dump(mode='json')
+        else:
+            experiment_data["id"] = new_id
+            if "created_at" not in experiment_data:
+                experiment_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                PasteExperiment(**experiment_data)
+            except Exception as e:
+                logger.warning(f"PasteExperiment validation warning: {e}")
+            exp_dict = experiment_data
+        
+        experiments.append(exp_dict)
+        data[DataCategory.PASTE_EXPERIMENTS.value] = experiments
         return self.save_data(data)
     
-    def delete_paste_experiment(self, experiment_id):
+    def delete_paste_experiment(self, experiment_id: int) -> bool:
         """删除净浆实验"""
         data = self.load_data()
-        experiments = data.get("paste_experiments", [])
+        experiments = data.get(DataCategory.PASTE_EXPERIMENTS.value, [])
         
         new_experiments = [e for e in experiments if e.get("id") != experiment_id]
         
         if len(new_experiments) < len(experiments):
-            data["paste_experiments"] = new_experiments
+            data[DataCategory.PASTE_EXPERIMENTS.value] = new_experiments
             return self.save_data(data)
         return False
 
-    def update_paste_experiment(self, experiment_id, updated_fields):
+    def update_paste_experiment(self, experiment_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新净浆实验"""
         data = self.load_data()
-        experiments = data.get("paste_experiments", [])
+        experiments = data.get(DataCategory.PASTE_EXPERIMENTS.value, [])
         updated = False
         for i, exp in enumerate(experiments):
             if exp.get("id") == experiment_id:
@@ -2101,46 +2319,60 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["paste_experiments"] = experiments
+            data[DataCategory.PASTE_EXPERIMENTS.value] = experiments
             return self.save_data(data)
         return False
     
     # 砂浆实验
-    def get_all_mortar_experiments(self):
+    def get_all_mortar_experiments(self) -> List[Dict[str, Any]]:
         """获取所有砂浆实验"""
         data = self.load_data()
-        return data.get("mortar_experiments", [])
+        return data.get(DataCategory.MORTAR_EXPERIMENTS.value, [])
     
-    def add_mortar_experiment(self, experiment_data):
+    def add_mortar_experiment(self, experiment_data: Union[Dict[str, Any], MortarExperiment]) -> bool:
         """添加新砂浆实验"""
         data = self.load_data()
-        experiments = data.get("mortar_experiments", [])
+        experiments = data.get(DataCategory.MORTAR_EXPERIMENTS.value, [])
         
         # 生成新ID
         new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
-        experiment_data["id"] = new_id
-        experiment_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        experiments.append(experiment_data)
-        data["mortar_experiments"] = experiments
+        if isinstance(experiment_data, MortarExperiment):
+            experiment_data.id = new_id
+            if not experiment_data.created_at:
+                experiment_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            exp_dict = experiment_data.model_dump(mode='json')
+        else:
+            experiment_data["id"] = new_id
+            if "created_at" not in experiment_data:
+                experiment_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                MortarExperiment(**experiment_data)
+            except Exception as e:
+                logger.warning(f"MortarExperiment validation warning: {e}")
+            exp_dict = experiment_data
+            
+        experiments.append(exp_dict)
+        data[DataCategory.MORTAR_EXPERIMENTS.value] = experiments
         return self.save_data(data)
     
-    def delete_mortar_experiment(self, experiment_id):
+    def delete_mortar_experiment(self, experiment_id: int) -> bool:
         """删除砂浆实验"""
         data = self.load_data()
-        experiments = data.get("mortar_experiments", [])
+        experiments = data.get(DataCategory.MORTAR_EXPERIMENTS.value, [])
         
         new_experiments = [e for e in experiments if e.get("id") != experiment_id]
         
         if len(new_experiments) < len(experiments):
-            data["mortar_experiments"] = new_experiments
+            data[DataCategory.MORTAR_EXPERIMENTS.value] = new_experiments
             return self.save_data(data)
         return False
 
-    def update_mortar_experiment(self, experiment_id, updated_fields):
+    def update_mortar_experiment(self, experiment_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新砂浆实验"""
         data = self.load_data()
-        experiments = data.get("mortar_experiments", [])
+        experiments = data.get(DataCategory.MORTAR_EXPERIMENTS.value, [])
         updated = False
         for i, exp in enumerate(experiments):
             if exp.get("id") == experiment_id:
@@ -2149,7 +2381,7 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["mortar_experiments"] = experiments
+            data[DataCategory.MORTAR_EXPERIMENTS.value] = experiments
             return self.save_data(data)
         return False
 
@@ -2157,12 +2389,12 @@ class DataManager:
     # 产品库存管理 (Product Inventory)
     # -----------------------------------------------------------
     
-    def get_product_inventory(self):
+    def get_product_inventory(self) -> List[Dict[str, Any]]:
         """获取所有产品库存"""
         data = self.load_data()
         return data.get("product_inventory", [])
         
-    def add_product_inventory_record(self, record_data, update_master_stock=True):
+    def add_product_inventory_record(self, record_data: Union[Dict[str, Any], ProductInventoryRecord], update_master_stock: bool = True) -> Tuple[bool, str]:
         """
         添加产品库存记录 (入库/出库)
         record_data: {
@@ -2179,17 +2411,32 @@ class DataManager:
         inventory = data.get("product_inventory", [])
         records = data.get("product_inventory_records", [])
         
+        # 统一转为字典处理
+        if isinstance(record_data, ProductInventoryRecord):
+            # 如果是模型，先确保ID和Created_at（如果有默认值逻辑的话）
+            # 但这里ID是在后面生成的。
+            rec_dict = record_data.model_dump(mode='json')
+        else:
+            rec_dict = record_data
+            # 简单校验
+            try:
+                # 临时校验，不强制要求所有字段完全匹配，因为这里ID还没生成
+                # ProductInventoryRecord(**rec_dict) 
+                pass
+            except Exception as e:
+                logger.warning(f"ProductInventoryRecord validation warning: {e}")
+
         # 1. 更新库存快照
-        product_name = record_data.get("product_name")
-        product_type = record_data.get("product_type", "其他")
-        qty = float(record_data.get("quantity", 0.0))
-        op_type = record_data.get("type")
+        product_name = rec_dict.get("product_name")
+        product_type = rec_dict.get("product_type", ProductCategory.OTHER.value)
+        qty = float(rec_dict.get("quantity", 0.0))
+        op_type = rec_dict.get("type")
         
         target_item = next((p for p in inventory if p.get("product_name") == product_name), None)
         
         if not target_item:
             # 新增产品
-            if op_type == "out":
+            if op_type == StockMovementType.OUT.value:
                 return False, "库存不足 (产品不存在)"
             
             target_item = {
@@ -2197,7 +2444,7 @@ class DataManager:
                 "product_name": product_name,
                 "type": product_type,
                 "current_stock": qty,
-                "unit": "吨",
+                "unit": DEFAULT_UNIT,
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             inventory.append(target_item)
@@ -2206,9 +2453,9 @@ class DataManager:
             current_stock = float(target_item.get("current_stock", 0.0))
             
             if update_master_stock:
-                if op_type in ["in", "produce_in", "return_in", "adjust_in"]:
+                if op_type in [StockMovementType.IN.value, StockMovementType.PRODUCE_IN.value, StockMovementType.RETURN_IN.value, StockMovementType.ADJUST_IN.value]:
                     current_stock += qty
-                elif op_type in ["out", "ship_out", "consume_out", "adjust_out"]:
+                elif op_type in [StockMovementType.OUT.value, StockMovementType.SHIP_OUT.value, StockMovementType.CONSUME_OUT.value, StockMovementType.ADJUST_OUT.value]:
                     if current_stock < qty:
                         # 允许负库存? 暂时允许警告但继续，或者禁止
                         pass 
@@ -2219,10 +2466,20 @@ class DataManager:
             
         # 2. 添加流水记录
         new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
-        record_data["id"] = new_rec_id
-        record_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        record_data["snapshot_stock"] = target_item["current_stock"]
-        records.append(record_data)
+        rec_dict["id"] = new_rec_id
+        if "created_at" not in rec_dict:
+            rec_dict["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rec_dict["snapshot_stock"] = target_item["current_stock"]
+        
+        # 再次校验完整性（可选）
+        if isinstance(record_data, ProductInventoryRecord):
+             # 如果输入是对象，更新对象ID
+             record_data.id = new_rec_id
+             record_data.snapshot_stock = target_item["current_stock"]
+             if not record_data.created_at:
+                 record_data.created_at = rec_dict["created_at"]
+        
+        records.append(rec_dict)
         
         data["product_inventory"] = inventory
         data["product_inventory_records"] = records
@@ -2231,7 +2488,7 @@ class DataManager:
             return True, "库存更新成功"
         return False, "保存失败"
 
-    def update_product_inventory_item(self, product_id, updates):
+    def update_product_inventory_item(self, product_id: int, updates: Dict[str, Any]) -> Tuple[bool, str]:
         """更新产品信息（支持级联更新名称和类型）"""
         data = self.load_data()
         inventory = data.get("product_inventory", [])
@@ -2280,14 +2537,12 @@ class DataManager:
             return False, "保存失败"
         return False, "未找到指定产品"
             
-        return False
-
-    def get_product_inventory_records(self):
+    def get_product_inventory_records(self) -> List[Dict[str, Any]]:
         """获取产品库存流水"""
         data = self.load_data()
         return data.get("product_inventory_records", [])
     
-    def get_admin_password(self):
+    def get_admin_password(self) -> Optional[str]:
         import os
         data = self.load_data()
         settings = data.get("system_settings") or {}
@@ -2322,7 +2577,7 @@ class DataManager:
         expected = self.get_admin_password()
         return secrets.compare_digest(str(password), str(expected))
     
-    def set_admin_password(self, password: str):
+    def set_admin_password(self, password: str) -> bool:
         data = self.load_data()
         settings = data.get("system_settings") or {}
         salt = secrets.token_hex(16)
@@ -2332,11 +2587,11 @@ class DataManager:
         data["system_settings"] = settings
         return self.save_data(data)
     
-    def ensure_raw_material_from_product(self, product_name, unit_target="kg"):
+    def ensure_raw_material_from_product(self, product_name: str, unit_target: str = UnitType.KG.value) -> Tuple[bool, str]:
         data = self.load_data()
-        inventory = data.get("product_inventory", [])
-        materials = data.get("raw_materials", [])
-        records = data.get("inventory_records", [])
+        inventory = data.get(DataCategory.PRODUCT_INVENTORY.value, [])
+        materials = data.get(DataCategory.RAW_MATERIALS.value, [])
+        records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
         prod = next((p for p in inventory if str(p.get("product_name", "")).strip() == str(product_name).strip()), None)
         if not prod:
             return False, f"未找到成品库存：{product_name}"
@@ -2357,7 +2612,7 @@ class DataManager:
             materials.append(mat)
         # 同步库存：将成品库存数量换算为原材料库存
         qty_ton = float(prod.get("current_stock", 0.0))
-        prod_unit = prod.get("unit", "吨")
+        prod_unit = prod.get("unit", UnitType.TON.value)
         final_qty, success = convert_quantity(qty_ton, prod_unit, unit_target)
         if not success and normalize_unit(prod_unit) != normalize_unit(unit_target):
             logger.warning(f"Unit conversion failed when migrating product to raw: {qty_ton} {prod_unit} -> {unit_target}")
@@ -2379,22 +2634,22 @@ class DataManager:
             "date": datetime.now().strftime("%Y-%m-%d"),
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "material_id": mat.get("id"),
-            "type": "adjust_in",
+            "type": StockMovementType.ADJUST_IN.value,
             "quantity": final_qty,
             "unit": unit_target,
             "reason": f"迁移自成品库存: {product_name}",
             "operator": "System",
             "snapshot_stock": final_qty
         })
-        data["raw_materials"] = materials
-        data["inventory_records"] = records
+        data[DataCategory.RAW_MATERIALS.value] = materials
+        data[DataCategory.INVENTORY_RECORDS.value] = records
         self.save_data(data)
         return True, "迁移成功"
     
-    def cleanup_migrated_raw_materials(self, names):
+    def cleanup_migrated_raw_materials(self, names: List[str]) -> Tuple[bool, str]:
         data = self.load_data()
-        materials = data.get("raw_materials", [])
-        records = data.get("inventory_records", [])
+        materials = data.get(DataCategory.RAW_MATERIALS.value, [])
+        records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
         name_set = set(str(n).strip() for n in names if n)
         target_ids = [m.get("id") for m in materials if str(m.get("name", "")).strip() in name_set]
         new_materials = [m for m in materials if str(m.get("name", "")).strip() not in name_set]
@@ -2405,16 +2660,16 @@ class DataManager:
             if mid in target_ids and reason.startswith("迁移自成品库存:"):
                 continue
             new_records.append(r)
-        data["raw_materials"] = new_materials
-        data["inventory_records"] = new_records
+        data[DataCategory.RAW_MATERIALS.value] = new_materials
+        data[DataCategory.INVENTORY_RECORDS.value] = new_records
         self.save_data(data)
         return True, f"已清除 {len(target_ids)} 项及相关台账"
     
-    def audit_and_fix_product_consumption_mismatch(self):
+    def audit_and_fix_product_consumption_mismatch(self) -> List[Dict[str, Any]]:
         data = self.load_data()
-        records = data.get("product_inventory_records", [])
-        issues = data.get("material_issues", [])
-        inventory = data.get("product_inventory", [])
+        records = data.get(DataCategory.PRODUCT_INVENTORY_RECORDS.value, [])
+        issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
+        inventory = data.get(DataCategory.PRODUCT_INVENTORY.value, [])
         issue_map = {}
         for iss in issues:
             code = iss.get("issue_code")
@@ -2442,10 +2697,10 @@ class DataManager:
         before_snapshot = { (it.get("name"), it.get("type")): float(it.get("stock_quantity", 0.0)) for it in inventory }
         fixed = []
         for i, r in enumerate(records):
-            if r.get("type") != "out":
+            if r.get("type") != StockMovementType.OUT.value:
                 continue
             pname = r.get("product_name")
-            ptype = r.get("product_type", "其他")
+            ptype = r.get("product_type", ProductCategory.OTHER.value)
             reason = r.get("reason", "")
             code = parse_issue_code(reason)
             if not code:
@@ -2462,6 +2717,12 @@ class DataManager:
             if not exp_name:
                 continue
             exp_norm_name, exp_norm_type = expect_norm(exp_name)
+            if ptype == ProductCategory.ACCELERATOR.value and exp_norm_type == "有碱速凝剂": # 这里需要确认 ACCELERATOR 是什么
+                # 实际上 ProductCategory.ACCELERATOR 是 "速凝剂"，而这里有更细分的 "无碱速凝剂"
+                # 由于代码中 logic 比较 specific，暂时保留字符串判断，或者需要扩充 Enum
+                pass 
+            
+            # 这里的逻辑比较特定，暂时保留原字符串判断，或者后续优化
             if ptype == "无碱速凝剂" and exp_norm_type == "有碱速凝剂":
                 qty = float(r.get("quantity", 0.0))
                 old_idx = find_item_idx(pname, ptype)
@@ -2473,7 +2734,7 @@ class DataManager:
                         "name": exp_norm_name,
                         "type": exp_norm_type,
                         "stock_quantity": 0.0,
-                        "unit": "吨",
+                        "unit": UnitType.TON.value,
                         "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
                     new_idx = len(inventory) - 1
@@ -2496,8 +2757,8 @@ class DataManager:
                     "new_type": exp_norm_type,
                     "quantity": qty
                 })
-        data["product_inventory"] = inventory
-        data["product_inventory_records"] = records
+        data[DataCategory.PRODUCT_INVENTORY.value] = inventory
+        data[DataCategory.PRODUCT_INVENTORY_RECORDS.value] = records
         self.save_data(data)
         after_snapshot = { (it.get("name"), it.get("type")): float(it.get("stock_quantity", 0.0)) for it in inventory }
         report_rows = []
@@ -2527,8 +2788,8 @@ class DataManager:
             list[dict]: 调整摘要
         """
         data = self.load_data()
-        inventory = data.get("product_inventory", [])
-        records = data.get("product_inventory_records", [])
+        inventory = data.get(DataCategory.PRODUCT_INVENTORY.value, [])
+        records = data.get(DataCategory.PRODUCT_INVENTORY_RECORDS.value, [])
         
         alias_map = {
             "YJSNJ-有碱速凝剂": ["有碱速凝剂", "碱速凝剂"],
@@ -2558,9 +2819,9 @@ class DataManager:
                 canonical_item = {
                     "id": max([p.get("id", 0) for p in inventory], default=0) + 1,
                     "product_name": canonical,
-                    "type": "有碱速凝剂" if "有碱速凝剂" in canonical else ("无碱速凝剂" if "无碱速凝剂" in canonical else group_items[0].get("type", "其他")),
+                    "type": "有碱速凝剂" if "有碱速凝剂" in canonical else ("无碱速凝剂" if "无碱速凝剂" in canonical else group_items[0].get("type", ProductCategory.OTHER.value)),
                     "current_stock": 0.0,
-                    "unit": group_items[0].get("unit", "吨"),
+                    "unit": group_items[0].get("unit", UnitType.TON.value),
                     "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
                 inventory.append(canonical_item)
@@ -2598,59 +2859,73 @@ class DataManager:
                 "更新台账记录数": updated_records
             })
         
-        data["product_inventory"] = inventory
-        data["product_inventory_records"] = records
+        data[DataCategory.PRODUCT_INVENTORY.value] = inventory
+        data[DataCategory.PRODUCT_INVENTORY_RECORDS.value] = records
         self.save_data(data)
         return adjustments
 
-    def delete_product_inventory_item(self, product_id):
+    def delete_product_inventory_item(self, product_id: int) -> bool:
         """删除产品库存条目"""
         data = self.load_data()
-        inventory = data.get("product_inventory", [])
+        inventory = data.get(DataCategory.PRODUCT_INVENTORY.value, [])
         
         new_inventory = [item for item in inventory if item.get("id") != product_id]
         
         if len(new_inventory) < len(inventory):
-            data["product_inventory"] = new_inventory
+            data[DataCategory.PRODUCT_INVENTORY.value] = new_inventory
             return self.save_data(data)
         return False
     
     # 混凝土实验
-    def get_all_concrete_experiments(self):
+    def get_all_concrete_experiments(self) -> List[Dict[str, Any]]:
         """获取所有混凝土实验"""
         data = self.load_data()
-        return data.get("concrete_experiments", [])
+        return data.get(DataCategory.CONCRETE_EXPERIMENTS.value, [])
     
-    def add_concrete_experiment(self, experiment_data):
+    def add_concrete_experiment(self, experiment_data: Union[Dict[str, Any], ConcreteExperiment]) -> bool:
         """添加新混凝土实验"""
         data = self.load_data()
-        experiments = data.get("concrete_experiments", [])
+        experiments = data.get(DataCategory.CONCRETE_EXPERIMENTS.value, [])
         
         # 生成新ID
         new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
-        experiment_data["id"] = new_id
-        experiment_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        experiments.append(experiment_data)
-        data["concrete_experiments"] = experiments
+        if isinstance(experiment_data, ConcreteExperiment):
+            experiment_data.id = new_id
+            if not experiment_data.created_at:
+                experiment_data.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            exp_dict = experiment_data.model_dump(mode='json')
+        else:
+            experiment_data["id"] = new_id
+            if "created_at" not in experiment_data:
+                experiment_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            try:
+                ConcreteExperiment(**experiment_data)
+            except Exception as e:
+                logger.warning(f"ConcreteExperiment validation warning: {e}")
+            exp_dict = experiment_data
+            
+        experiments.append(exp_dict)
+        data[DataCategory.CONCRETE_EXPERIMENTS.value] = experiments
         return self.save_data(data)
     
-    def delete_concrete_experiment(self, experiment_id):
+    def delete_concrete_experiment(self, experiment_id: int) -> bool:
         """删除混凝土实验"""
         data = self.load_data()
-        experiments = data.get("concrete_experiments", [])
+        experiments = data.get(DataCategory.CONCRETE_EXPERIMENTS.value, [])
         
         new_experiments = [e for e in experiments if e.get("id") != experiment_id]
         
         if len(new_experiments) < len(experiments):
-            data["concrete_experiments"] = new_experiments
+            data[DataCategory.CONCRETE_EXPERIMENTS.value] = new_experiments
             return self.save_data(data)
         return False
 
-    def update_concrete_experiment(self, experiment_id, updated_fields):
+    def update_concrete_experiment(self, experiment_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新混凝土实验"""
         data = self.load_data()
-        experiments = data.get("concrete_experiments", [])
+        experiments = data.get(DataCategory.CONCRETE_EXPERIMENTS.value, [])
         updated = False
         for i, exp in enumerate(experiments):
             if exp.get("id") == experiment_id:
@@ -2659,70 +2934,119 @@ class DataManager:
                 updated = True
                 break
         if updated:
-            data["concrete_experiments"] = experiments
+            data[DataCategory.CONCRETE_EXPERIMENTS.value] = experiments
             return self.save_data(data)
         return False
 
-    # -------------------- 采购/入库单 (Goods Receipts) --------------------
-    def get_goods_receipts(self):
-        data = self.load_data()
-        return data.get("goods_receipts", [])
 
-    def create_goods_receipt(self, receipt_data):
-        """创建采购入库单"""
+    # -------------------- 采购收货管理 --------------------
+    def get_all_goods_receipts(self) -> List[Dict[str, Any]]:
+        """获取所有采购收货单"""
         data = self.load_data()
-        receipts = data.get("goods_receipts", [])
+        return data.get(DataCategory.GOODS_RECEIPTS.value, [])
+
+    def add_goods_receipt(self, receipt_data: Union[Dict[str, Any], GoodsReceipt]) -> bool:
+        """创建采购收货单"""
+        data = self.load_data()
+        receipts = data.get(DataCategory.GOODS_RECEIPTS.value, [])
         
+        if isinstance(receipt_data, GoodsReceipt):
+            new_receipt = receipt_data.model_dump(mode='json')
+        else:
+            new_receipt = receipt_data.copy()
+            
+        # 生成ID
         new_id = max([r.get("id", 0) for r in receipts], default=0) + 1
-        receipt_data["id"] = new_id
-        receipt_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if not receipt_data.get("receipt_code"):
-             receipt_data["receipt_code"] = f"GR-{datetime.now().strftime('%Y%m%d')}-{new_id:04d}"
+        new_receipt["id"] = new_id
         
-        receipts.append(receipt_data)
-        data["goods_receipts"] = receipts
+        # 补充默认字段
+        if "created_at" not in new_receipt:
+            new_receipt["created_at"] = datetime.now().strftime(DATETIME_FORMAT)
+        if "status" not in new_receipt:
+            new_receipt["status"] = ReceiptStatus.DRAFT.value
+        if not new_receipt.get("receipt_code"):
+            new_receipt["receipt_code"] = f"GR-{datetime.now().strftime('%Y%m%d')}-{new_id:04d}"
+            
+        receipts.append(new_receipt)
+        data[DataCategory.GOODS_RECEIPTS.value] = receipts
         return self.save_data(data)
 
-    def delete_goods_receipt(self, receipt_id):
+    def update_goods_receipt(self, receipt_id: int, updates: Dict[str, Any]) -> bool:
+        """更新采购收货单"""
+        data = self.load_data()
+        receipts = data.get(DataCategory.GOODS_RECEIPTS.value, [])
+        
+        for i, r in enumerate(receipts):
+            if r.get("id") == receipt_id:
+                receipts[i].update(updates)
+                data[DataCategory.GOODS_RECEIPTS.value] = receipts
+                return self.save_data(data)
+        return False
+
+    def delete_goods_receipt(self, receipt_id: int) -> bool:
         """删除采购入库单"""
         data = self.load_data()
-        receipts = data.get("goods_receipts", [])
+        receipts = data.get(DataCategory.GOODS_RECEIPTS.value, [])
         new_receipts = [r for r in receipts if r.get("id") != receipt_id]
         if len(new_receipts) < len(receipts):
-            data["goods_receipts"] = new_receipts
+            data[DataCategory.GOODS_RECEIPTS.value] = new_receipts
             return self.save_data(data)
         return False
 
-    # -------------------- 发货/出库单 (Shipping Orders) --------------------
-    def get_shipping_orders(self):
+    # -------------------- 销售发货管理 --------------------
+    def get_all_shipping_orders(self) -> List[Dict[str, Any]]:
+        """获取所有销售发货单"""
         data = self.load_data()
-        return data.get("shipping_orders", [])
+        return data.get(DataCategory.SHIPPING_ORDERS.value, [])
 
-    def create_shipping_order(self, shipping_data):
-        """创建发货单"""
+    def add_shipping_order(self, order_data: Union[Dict[str, Any], ShippingOrder]) -> bool:
+        """创建销售发货单"""
         data = self.load_data()
-        orders = data.get("shipping_orders", [])
+        orders = data.get(DataCategory.SHIPPING_ORDERS.value, [])
         
+        if isinstance(order_data, ShippingOrder):
+            new_order = order_data.model_dump(mode='json')
+        else:
+            new_order = order_data.copy()
+            
+        # 生成ID
         new_id = max([o.get("id", 0) for o in orders], default=0) + 1
-        shipping_data["id"] = new_id
-        shipping_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if not shipping_data.get("shipping_code"):
-             shipping_data["shipping_code"] = f"SHIP-{datetime.now().strftime('%Y%m%d')}-{new_id:04d}"
-             
-        orders.append(shipping_data)
-        data["shipping_orders"] = orders
+        new_order["id"] = new_id
+        
+        # 补充默认字段
+        if "created_at" not in new_order:
+            new_order["created_at"] = datetime.now().strftime(DATETIME_FORMAT)
+        if "status" not in new_order:
+            new_order["status"] = ShippingStatus.DRAFT.value
+        if not new_order.get("shipping_code"):
+            new_order["shipping_code"] = f"SHIP-{datetime.now().strftime('%Y%m%d')}-{new_id:04d}"
+            
+        orders.append(new_order)
+        data[DataCategory.SHIPPING_ORDERS.value] = orders
         return self.save_data(data)
 
-    def delete_shipping_order(self, order_id):
+    def update_shipping_order(self, order_id: int, updates: Dict[str, Any]) -> bool:
+        """更新销售发货单"""
+        data = self.load_data()
+        orders = data.get(DataCategory.SHIPPING_ORDERS.value, [])
+        
+        for i, o in enumerate(orders):
+            if o.get("id") == order_id:
+                orders[i].update(updates)
+                data[DataCategory.SHIPPING_ORDERS.value] = orders
+                return self.save_data(data)
+        return False
+
+    def delete_shipping_order(self, order_id: int) -> bool:
         """删除发货单"""
         data = self.load_data()
-        orders = data.get("shipping_orders", [])
+        orders = data.get(DataCategory.SHIPPING_ORDERS.value, [])
         new_orders = [o for o in orders if o.get("id") != order_id]
         if len(new_orders) < len(orders):
-            data["shipping_orders"] = new_orders
+            data[DataCategory.SHIPPING_ORDERS.value] = new_orders
             return self.save_data(data)
         return False
-    
+
     # -------------------- 数据导出/导入功能 --------------------
     def export_to_excel(self):
         """将所有数据导出到Excel文件"""
@@ -2737,48 +3061,48 @@ class DataManager:
                 
                 # 导出各个数据表
                 # 1. 项目数据
-                if data.get("projects"):
-                    projects_df = pd.DataFrame(data["projects"])
+                if data.get(DataCategory.PROJECTS.value):
+                    projects_df = pd.DataFrame(data[DataCategory.PROJECTS.value])
                     projects_df.to_excel(writer, sheet_name='项目', index=False)
                 
                 # 2. 实验数据
-                if data.get("experiments"):
-                    experiments_df = pd.DataFrame(data["experiments"])
+                if data.get(DataCategory.EXPERIMENTS.value):
+                    experiments_df = pd.DataFrame(data[DataCategory.EXPERIMENTS.value])
                     experiments_df.to_excel(writer, sheet_name='实验', index=False)
                 
                 # 3. 原材料数据
-                if data.get("raw_materials"):
-                    raw_materials_df = pd.DataFrame(data["raw_materials"])
+                if data.get(DataCategory.RAW_MATERIALS.value):
+                    raw_materials_df = pd.DataFrame(data[DataCategory.RAW_MATERIALS.value])
                     raw_materials_df.to_excel(writer, sheet_name='原材料', index=False)
                 
                 # 4. 合成实验记录
-                if data.get("synthesis_records"):
-                    synthesis_df = pd.DataFrame(data["synthesis_records"])
+                if data.get(DataCategory.SYNTHESIS_RECORDS.value):
+                    synthesis_df = pd.DataFrame(data[DataCategory.SYNTHESIS_RECORDS.value])
                     synthesis_df.to_excel(writer, sheet_name='合成实验', index=False)
                 
                 # 5. 成品减水剂
-                if data.get("products"):
-                    products_df = pd.DataFrame(data["products"])
+                if data.get(DataCategory.PRODUCTS.value):
+                    products_df = pd.DataFrame(data[DataCategory.PRODUCTS.value])
                     products_df.to_excel(writer, sheet_name='成品减水剂', index=False)
                 
                 # 6. 净浆实验
-                if data.get("paste_experiments"):
-                    paste_df = pd.DataFrame(data["paste_experiments"])
+                if data.get(DataCategory.PASTE_EXPERIMENTS.value):
+                    paste_df = pd.DataFrame(data[DataCategory.PASTE_EXPERIMENTS.value])
                     paste_df.to_excel(writer, sheet_name='净浆实验', index=False)
                 
                 # 7. 砂浆实验
-                if data.get("mortar_experiments"):
-                    mortar_df = pd.DataFrame(data["mortar_experiments"])
+                if data.get(DataCategory.MORTAR_EXPERIMENTS.value):
+                    mortar_df = pd.DataFrame(data[DataCategory.MORTAR_EXPERIMENTS.value])
                     mortar_df.to_excel(writer, sheet_name='砂浆实验', index=False)
                 
                 # 8. 混凝土实验
-                if data.get("concrete_experiments"):
-                    concrete_df = pd.DataFrame(data["concrete_experiments"])
+                if data.get(DataCategory.CONCRETE_EXPERIMENTS.value):
+                    concrete_df = pd.DataFrame(data[DataCategory.CONCRETE_EXPERIMENTS.value])
                     concrete_df.to_excel(writer, sheet_name='混凝土实验', index=False)
                 
                 # 9. 性能数据
-                if data.get("performance_data"):
-                    perf_data = data["performance_data"]
+                if data.get(DataCategory.PERFORMANCE_DATA.value):
+                    perf_data = data[DataCategory.PERFORMANCE_DATA.value]
                     if perf_data.get("synthesis"):
                         perf_synth_df = pd.DataFrame(perf_data["synthesis"])
                         perf_synth_df.to_excel(writer, sheet_name='合成性能数据', index=False)
@@ -2816,10 +3140,10 @@ class DataManager:
         try:
             data = self.load_data()
             if experiment_type == "mortar":
-                records = data.get("mortar_experiments", [])
+                records = data.get(DataCategory.MORTAR_EXPERIMENTS.value, [])
                 sheet_title = "砂浆实验报告"
             elif experiment_type == "concrete":
-                records = data.get("concrete_experiments", [])
+                records = data.get(DataCategory.CONCRETE_EXPERIMENTS.value, [])
                 sheet_title = "混凝土实验报告"
             else:
                 st.error("不支持的实验类型")

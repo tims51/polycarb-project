@@ -7,23 +7,31 @@ from utils.unit_helper import convert_quantity, normalize_unit
 
 def render_sap_bom(data_manager):
     """渲染 SAP/BOM 管理页面"""
+    
+    # 获取 Service 实例
+    bom_service = st.session_state.services.get('bom_service')
+    if not bom_service:
+        # Fallback if not initialized (though main.py should handle this)
+        from services.bom_service import BOMService
+        bom_service = BOMService(data_manager)
+        
     st.header("🏭 SAP/BOM 管理")
     
     tab1, tab2, tab3, tab4 = st.tabs(["🧬 BOM 管理", "🏭 生产管理", "🚚 发货管理", "📈 台账报表"])
     
     with tab1:
-        _render_bom_management(data_manager)
+        _render_bom_management(data_manager, bom_service)
     
     with tab2:
-        _render_production_management(data_manager)
+        _render_production_management(data_manager, bom_service)
 
     with tab3:
         _render_shipping_management(data_manager)
         
     with tab4:
-        _render_inventory_reports(data_manager)
+        _render_inventory_reports(data_manager, bom_service)
 
-def _render_bom_management(data_manager):
+def _render_bom_management(data_manager, bom_service):
     st.subheader("BOM 主数据管理")
     
     user = st.session_state.get("current_user")
@@ -250,7 +258,11 @@ def _render_bom_detail(data_manager, bom):
 
     # 结构树可视化
     with st.expander("🌳 查看多级 BOM 结构树"):
-        _render_bom_tree_recursive(data_manager, bom['id'])
+        bom_tree = bom_service.get_bom_tree_structure(bom['id'])
+        if bom_tree:
+            _render_bom_tree_from_struct(bom_tree)
+        else:
+            st.info("无法加载 BOM 结构")
 
     st.divider()
     st.markdown("#### 版本管理")
@@ -287,11 +299,28 @@ def _render_bom_detail(data_manager, bom):
                 st.info("请选择两个不同的版本进行对比。")
             else:
                 st.caption(f"对比方向：{ver_a.get('version')} → {ver_b.get('version')}")
-                diff_df = _build_bom_version_diff(ver_a, ver_b)
-                if diff_df is None or diff_df.empty:
+                # 使用 Service 计算差异
+                diff_list = bom_service.get_bom_version_diff(ver_a, ver_b)
+                if not diff_list:
                     st.info("两个版本在物料构成和用量上没有差异。")
                 else:
-                    st.dataframe(diff_df, use_container_width=True)
+                    # 转换为 DataFrame 展示
+                    diff_data = []
+                    for d in diff_list:
+                        change_type = d['type']
+                        if change_type == 'modified':
+                            desc = f"修改: {d['old_qty']} -> {d['new_qty']}"
+                        elif change_type == 'added':
+                            desc = f"新增: {d['qty']}"
+                        else:
+                            desc = f"删除: {d['qty']}"
+                        diff_data.append({
+                            "物料": d['item_name'],
+                            "类型": change_type,
+                            "单位": d['uom'],
+                            "详情": desc
+                        })
+                    st.dataframe(pd.DataFrame(diff_data), use_container_width=True)
     
     if st.button("➕ 新增版本"):
         existing_nums = []
@@ -641,7 +670,7 @@ def _render_version_editor(data_manager, version, mat_options):
     else:
         st.success("版本已保存")
 
-def _render_production_management(data_manager):
+def _render_production_management(data_manager, bom_service):
     st.subheader("生产订单管理")
     
     user = st.session_state.get("current_user")
@@ -1173,6 +1202,9 @@ def _render_production_management(data_manager):
                 else:
                     st.write("版本: -")
             
+            # 使用 Service 展示追溯信息（此处暂保持原有逻辑，因为涉及多表联合查询，若要迁移需在 BOMService 中新增 get_traceability_info）
+            # 这里的逻辑主要是数据展示，耦合度尚可接受，暂不强制迁移
+            
             issues = data_manager.get_material_issues(order['id'])
             if issues:
                 st.markdown("##### 关联单据")
@@ -1360,12 +1392,7 @@ def _render_shipping_management(data_manager):
                               .replace("reason", "详情/备注").replace("operator", "操作人")
                               .replace("snapshot_stock", "发货后结存") for c in df_display.columns]
         
-        st.dataframe(df_display, use_container_width=True)
-        _render_export_download(df_display, "发货记录", "shipping_export")
-    else:
-        st.info("暂无发货记录")
-
-def _render_inventory_reports(data_manager):
+def _render_inventory_reports(data_manager, bom_service):
     st.subheader("库存台账报表")
     
     tab_bal, tab_ledger, tab_prodcons, tab_stats = st.tabs(["💰 库存余额", "📝 台账流水", "📉 成品消耗", "📊 综合统计"])
@@ -1705,51 +1732,55 @@ def _render_inventory_reports(data_manager):
                                       {"指标": "生产(吨)", "总量": f"{total_prod:.4f}"},
                                       {"指标": "发货(吨)", "总量": f"{total_ship:.4f}"}]).to_excel(writer, index=False, sheet_name='摘要')
                 st.download_button("导出整合Excel", all_out.getvalue(), file_name=f"综合统计_{gran}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-def _render_bom_tree_recursive(data_manager, bom_id, level=0, visited=None):
-    """递归渲染 BOM 结构树"""
-    if visited is None: visited = set()
-    
-    # 防止无限递归
-    if bom_id in visited:
-        st.markdown(f"{'&nbsp;' * 4 * level} 🔄 (循环引用: ID {bom_id})", unsafe_allow_html=True)
+# 移除 _render_bom_tree_recursive，已迁移至 BOMService 并重构为 _render_bom_tree_from_struct
+
+def _render_bom_tree_from_struct(node):
+    if not node:
         return
-    visited.add(bom_id)
+
+    # Determine indentation
+    level = node.get("level", 0)
+    indent_space = "&nbsp;" * (level * 4)
     
-    # 获取 BOM 信息
-    boms = data_manager.get_all_boms()
-    bom = next((b for b in boms if b['id'] == bom_id), None)
-    if not bom: return
-    
-    # 获取最新有效版本（根据生效日期与明细行）
-    latest_ver = data_manager.get_effective_bom_version(bom_id)
-    if not latest_ver:
-        st.markdown(f"{'&nbsp;' * 4 * level} 📦 **{bom['bom_name']}** (无版本)", unsafe_allow_html=True)
-        return
-    
-    # 渲染节点
-    indent = "&nbsp;" * 4 * level
-    icon = "🏭" if level == 0 else "🔧"
-    st.markdown(f"{indent} {icon} **{bom['bom_name']}** ({bom['bom_code']}) <span style='color:grey; font-size:0.8em'>V{latest_ver['version']}</span>", unsafe_allow_html=True)
-    
-    # 渲染子节点
-    for line in latest_ver.get("lines", []):
-        item_name = line.get('item_name', 'Unknown')
-        qty = line.get('qty', 0)
-        uom = line.get('uom', 'kg')
-        item_type = line.get('item_type', 'raw_material')
-        subs = line.get('substitutes', '')
-        
-        child_indent = "&nbsp;" * 4 * (level + 1)
-        
-        note = ""
-        if subs: note = f" <span style='color:orange; font-size:0.8em'>(替: {subs})</span>"
-        
-        if item_type == "product":
-            # 递归调用
-            # 先打印行本身
-            st.markdown(f"{child_indent} 📦 {item_name}: {qty} {uom}{note}", unsafe_allow_html=True)
-            # 递归
-            _render_bom_tree_recursive(data_manager, line.get('item_id'), level + 1, visited.copy())
+    # Check if it is a BOM definition (Root) or a Line Item
+    if "code" in node:
+        # It is a BOM structure root
+        name = node.get("name", "")
+        code = node.get("code", "")
+        ver = node.get("version", "")
+        if node.get("is_loop"):
+            st.markdown(f"{indent_space}⚠️ **{name}** ({code}) - <span style='color:red'>循环引用</span>", unsafe_allow_html=True)
+            return
+            
+        header = f"📦 **{name}**"
+        if code:
+            header += f" ({code})"
+        if ver:
+            header += f" <span style='color:gray; font-size:0.9em'>ver: {ver}</span>"
         else:
-            # 叶子节点 (原材料)
-            st.markdown(f"{child_indent} 🧪 {item_name}: {qty} {uom}{note}", unsafe_allow_html=True)
+            header += f" <span style='color:orange; font-size:0.9em'>(无生效版本)</span>"
+            
+        st.markdown(f"{indent_space}{header}", unsafe_allow_html=True)
+        
+        # Render children lines
+        if "children" in node:
+            for child in node["children"]:
+                _render_bom_tree_from_struct(child)
+                
+    else:
+        # It is a Line Item
+        name = node.get("item_name", "Unknown")
+        qty = node.get("qty", 0)
+        uom = node.get("uom", "kg")
+        subs = node.get("substitutes", "")
+        
+        info = f"{qty} {uom}"
+        if subs:
+            info += f" | 🔄 替代: {subs}"
+            
+        st.markdown(f"{indent_space}🔹 {name} <span style='color:gray'>: {info}</span>", unsafe_allow_html=True)
+        
+        # Check for sub-BOM (recursive structure)
+        if "sub_bom" in node:
+             _render_bom_tree_from_struct(node["sub_bom"])
+
