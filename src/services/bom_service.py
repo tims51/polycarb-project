@@ -1,266 +1,151 @@
-from typing import List, Dict, Any, Optional, Set, Tuple
-from core.data_manager import DataManager
-from utils.unit_helper import convert_quantity
-from core.models import BOM, BOMVersion
-from core.enums import MaterialType, UnitType
+import logging
+from typing import List, Dict, Any, Union, Optional
+from datetime import datetime
+
+from schemas.bom import BOMItem
+from core.enums import DataCategory, UnitType, MaterialType
+from services.data_service import DataService
+
+logger = logging.getLogger(__name__)
 
 class BOMService:
-    """
-    BOM 业务逻辑服务层
-    处理 BOM 树构建、版本比对、生产计划计算等复杂逻辑
-    """
-    
-    def __init__(self, data_manager: DataManager):
-        self.data_manager = data_manager
+    def __init__(self, data_service: DataService = None):
+        self.data_service = data_service or DataService()
 
-    def get_bom_tree_structure(self, bom_id: int, level: int = 0, visited: Optional[Set[int]] = None) -> Dict[str, Any]:
+    def explode_bom(self, bom_version_id: Union[int, str], target_qty: float = 1000.0) -> List[Dict[str, Any]]:
         """
-        构建 BOM 树形结构数据
+        BOM 展开计算
+        Args:
+            bom_version_id: 版本ID
+            target_qty: 目标产量
         Returns:
-            Dict: {
-                "id": bom_id,
-                "name": str,
-                "code": str,
-                "version": str,
-                "children": List[Dict],
-                "is_loop": bool,
-                "error": str
-            }
+            list: [{item_id, item_name, item_type, required_qty, uom, ...}]
         """
-        if visited is None:
-            visited = set()
-            
-        # 防止无限递归
-        if bom_id in visited:
-            return {
-                "id": bom_id,
-                "name": "循环引用",
-                "is_loop": True,
-                "level": level
-            }
+        return self.data_service.explode_bom(bom_version_id, target_qty)
+
+    def get_bom_tree_structure(self, bom_id: int, depth: int = 0, max_depth: int = 5) -> Optional[Dict[str, Any]]:
+        """
+        构建 BOM 多级树状结构
+        """
+        if depth > max_depth:
+            return {"name": "Max Depth Reached", "code": "", "is_loop": True}
+
+        data = self.data_service.load_data()
+        boms = data.get(DataCategory.BOMS.value, [])
         
-        current_visited = visited.copy()
-        current_visited.add(bom_id)
-        
-        # 获取 BOM 信息
-        boms = self.data_manager.get_all_boms()
-        bom = next((b for b in boms if b['id'] == bom_id), None)
+        bom = next((b for b in boms if b.get("id") == bom_id), None)
         if not bom:
             return None
-            
-        # 获取最新有效版本
-        latest_ver = self.data_manager.get_effective_bom_version(bom_id)
+
+        # 获取当前有效版本
+        version = self.data_service.get_effective_bom_version(bom_id)
         
         node = {
-            "id": bom_id,
-            "name": bom.get('bom_name', ''),
-            "code": bom.get('bom_code', ''),
-            "version": latest_ver.get('version', '无版本') if latest_ver else None,
-            "level": level,
-            "children": [],
-            "has_version": bool(latest_ver)
+            "id": bom.get("id"),
+            "name": bom.get("bom_name"),
+            "code": bom.get("bom_code"),
+            "type": bom.get("bom_type"),
+            "version": version.get("version") if version else None,
+            "version_id": version.get("id") if version else None,
+            "level": depth,
+            "children": []
         }
-        
-        if not latest_ver:
-            return node
-            
-        # 构建子节点
-        for line in latest_ver.get("lines", []):
-            item_type = line.get('item_type', MaterialType.RAW_MATERIAL.value)
-            item_id = line.get('item_id')
-            
-            child_node = {
-                "item_name": line.get('item_name', 'Unknown'),
-                "qty": line.get('qty', 0),
-                "uom": line.get('uom', UnitType.KG.value),
-                "item_type": item_type,
-                "substitutes": line.get('substitutes', ''),
-                "level": level + 1,
-                "children": [] # 用于递归
-            }
-            
-            if item_type == MaterialType.PRODUCT.value and item_id:
-                # 递归获取子结构
-                sub_structure = self.get_bom_tree_structure(item_id, level + 1, current_visited)
-                if sub_structure:
-                    child_node["sub_bom"] = sub_structure
+
+        if version:
+            lines = version.get("lines", [])
+            for line in lines:
+                item_type = line.get("item_type", MaterialType.RAW_MATERIAL.value)
+                item_id = line.get("item_id")
+                
+                child_node = {
+                    "item_id": item_id,
+                    "item_name": line.get("item_name"),
+                    "item_type": item_type,
+                    "qty": line.get("qty"),
+                    "uom": line.get("uom"),
+                    "phase": line.get("phase"),
+                    "substitutes": line.get("substitutes"),
+                    "level": depth + 1
+                }
+
+                # 如果是半成品/成品，递归查找其 BOM
+                # 这里假设 item_type == 'product' 时，item_id 对应 product_inventory 的 ID
+                # 我们需要找到该 product 对应的 BOM
+                # 这是一个反向查找：Product -> BOM
+                # 通常 Product Name == BOM Name
+                if item_type == MaterialType.PRODUCT.value:
+                    sub_bom = None
+                    # 尝试通过名称匹配 BOM
+                    for b in boms:
+                        # 简化匹配逻辑：BOM Name == Item Name
+                        if b.get("bom_name") == line.get("item_name"):
+                            sub_bom = b
+                            break
                     
-            node["children"].append(child_node)
-            
+                    if sub_bom:
+                        # 递归
+                        sub_tree = self.get_bom_tree_structure(sub_bom.get("id"), depth + 1, max_depth)
+                        child_node["sub_bom"] = sub_tree
+                
+                node["children"].append(child_node)
+
         return node
 
-    def calculate_production_plan(self, plan_batch_kg: float, target_types: List[str]) -> List[Dict[str, Any]]:
+    def get_bom_version_diff(self, version_a: Dict[str, Any], version_b: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
-        计算生产计划可行性与原材料需求
+        比较两个 BOM 版本的差异
+        Returns: List of diffs
         """
-        all_boms = self.data_manager.get_all_boms()
-        raw_materials = self.data_manager.get_all_raw_materials()
+        lines_a = version_a.get("lines", []) or []
+        lines_b = version_b.get("lines", []) or []
         
-        # 构建库存映射
-        mat_inv = {m["id"]: float(m.get("stock_quantity", 0.0)) for m in raw_materials}
-        bom_map = {b["id"]: f"{b.get('bom_code')}-{b.get('bom_name')}" for b in all_boms}
-        
-        # 筛选目标类型的 BOM
-        type_boms = [b for b in all_boms if b.get("bom_type") in target_types]
-        
-        candidates = []
-        for b in type_boms:
-            v = self.data_manager.get_effective_bom_version(b["id"])
-            if not v:
-                continue
-                
-            req = self._calculate_per_batch_requirement(v, plan_batch_kg)
-            if not req:
-                continue
-                
-            score = self._calculate_scarcity_score(req, mat_inv)
+        # Map by (item_type, item_id)
+        map_a = {}
+        for l in lines_a:
+            key = (l.get("item_type"), l.get("item_id"))
+            map_a[key] = l
             
-            # 计算最大可生产批次
-            batches = 0
-            if req:
-                batch_limits = []
-                for mid, q in req.items():
-                    if q > 0:
-                        batch_limits.append(int((mat_inv.get(mid, 0.0)) // q))
-                    else:
-                        batch_limits.append(999999)
-                batches = min(batch_limits) if batch_limits else 0
+        map_b = {}
+        for l in lines_b:
+            key = (l.get("item_type"), l.get("item_id"))
+            map_b[key] = l
             
-            candidates.append({
-                "bom_id": b["id"],
-                "bom_label": bom_map.get(b["id"]),
-                "bom_type": b.get("bom_type"),
-                "version_id": v["id"],
-                "per_batch_require": req,
-                "scarcity_score": score,
-                "max_batches_possible": batches
-            })
-            
-        # 按类型选择最优（紧缺度最低）
-        by_type = {}
-        for c in candidates:
-            t = c["bom_type"]
-            if t not in by_type or c["scarcity_score"] < by_type[t]["scarcity_score"]:
-                by_type[t] = c
-                
-        # 格式化结果
-        report_rows = []
-        for t, sel in by_type.items():
-            total_req = sum(sel["per_batch_require"].values())
-            report_rows.append({
-                "产品类型": t,
-                "选用配方": sel["bom_label"],
-                "可生产批次": sel["max_batches_possible"],
-                "每批次原材料合计(kg)": round(total_req, 4),
-                "_raw_data": sel # 保留原始数据供后续使用
-            })
-            
-        return report_rows
-
-    def _calculate_per_batch_requirement(self, version: Dict, plan_batch_kg: float) -> Dict[int, float]:
-        """计算单批次原材料需求"""
-        base = float(version.get("yield_base", 1000.0) or 1000.0)
-        if base <= 0: base = 1000.0
-        
-        ratio = plan_batch_kg / base
-        req = {}
-        
-        for line in version.get("lines", []):
-            if line.get("item_type", MaterialType.RAW_MATERIAL.value) == MaterialType.RAW_MATERIAL.value:
-                mid = line.get("item_id")
-                lqty = float(line.get("qty", 0.0))
-                luom = line.get("uom", UnitType.KG.value)
-                
-                need = lqty * ratio
-                need_kg, ok = convert_quantity(need, luom, UnitType.KG.value)
-                
-                req[mid] = req.get(mid, 0.0) + (need_kg if ok else need)
-        return req
-
-    def _calculate_scarcity_score(self, requirements: Dict[int, float], inventory: Dict[int, float]) -> float:
-        """计算紧缺度评分 (分数越高越紧缺)"""
-        s = 0.0
-        for mid, q in requirements.items():
-            avail = inventory.get(mid, 0.0)
-            # 可用量越少，权重越大
-            w = 1.0 / (avail if avail > 0 else 1e-9)
-            s += q * w
-        return s
-
-    def get_bom_version_diff(self, old_ver: Dict, new_ver: Dict) -> List[Dict[str, Any]]:
-        """计算两个 BOM 版本的差异"""
         diffs = []
+        all_keys = set(map_a.keys()) | set(map_b.keys())
         
-        old_lines = {l.get("item_id"): l for l in old_ver.get("lines", [])}
-        new_lines = {l.get("item_id"): l for l in new_ver.get("lines", [])}
-        
-        all_ids = set(old_lines.keys()) | set(new_lines.keys())
-        
-        for mid in all_ids:
-            old_l = old_lines.get(mid)
-            new_l = new_lines.get(mid)
+        for key in all_keys:
+            la = map_a.get(key)
+            lb = map_b.get(key)
             
-            if old_l and new_l:
-                # 比较数量
-                q1 = float(old_l.get("qty", 0))
-                q2 = float(new_l.get("qty", 0))
-                if abs(q1 - q2) > 1e-6:
-                    diffs.append({
-                        "type": "modified",
-                        "item_name": new_l.get("item_name"),
-                        "old_qty": q1,
-                        "new_qty": q2,
-                        "uom": new_l.get("uom")
-                    })
-            elif old_l:
+            if la and not lb:
                 diffs.append({
                     "type": "deleted",
-                    "item_name": old_l.get("item_name"),
-                    "qty": old_l.get("qty"),
-                    "uom": old_l.get("uom")
+                    "item_name": la.get("item_name"),
+                    "uom": la.get("uom"),
+                    "qty": float(la.get("qty", 0)),
+                    "old_qty": float(la.get("qty", 0)),
+                    "new_qty": 0
                 })
-            elif new_l:
+            elif not la and lb:
                 diffs.append({
                     "type": "added",
-                    "item_name": new_l.get("item_name"),
-                    "qty": new_l.get("qty"),
-                    "uom": new_l.get("uom")
+                    "item_name": lb.get("item_name"),
+                    "uom": lb.get("uom"),
+                    "qty": float(lb.get("qty", 0)),
+                    "old_qty": 0,
+                    "new_qty": float(lb.get("qty", 0))
                 })
-                
+            else:
+                qty_a = float(la.get("qty", 0))
+                qty_b = float(lb.get("qty", 0))
+                if abs(qty_a - qty_b) > 1e-6:
+                     diffs.append({
+                        "type": "modified",
+                        "item_name": lb.get("item_name"),
+                        "uom": lb.get("uom"),
+                        "qty": qty_b - qty_a,
+                        "old_qty": qty_a,
+                        "new_qty": qty_b
+                    })
+        
         return diffs
-    
-    def get_material_usage_stats(self, target_types: List[str]) -> Dict[int, int]:
-        """统计指定类型的 BOM 在生产单中的原材料使用频次"""
-        orders_all = self.data_manager.get_all_production_orders()
-        all_boms = self.data_manager.get_all_boms()
-        all_versions = self.data_manager.get_all_bom_versions()
-        
-        bom_type_map = {b.get("id"): b.get("bom_type") for b in all_boms}
-        ver_map = {v.get("id"): v for v in all_versions}
-        
-        mat_prod_count = {}
-        
-        for o in orders_all:
-            status = o.get("status")
-            if status not in ["released", "issued", "finished"]:
-                continue
-                
-            bid = o.get("bom_id")
-            if bom_type_map.get(bid) not in target_types:
-                continue
-                
-            ver = ver_map.get(o.get("bom_version_id"))
-            if not ver:
-                continue
-                
-            used_mids = set()
-            for line in ver.get("lines", []):
-                if line.get("item_type", MaterialType.RAW_MATERIAL.value) == MaterialType.RAW_MATERIAL.value:
-                    mid = line.get("item_id")
-                    if mid:
-                        used_mids.add(mid)
-            
-            for mid in used_mids:
-                mat_prod_count[mid] = mat_prod_count.get(mid, 0) + 1
-                
-        return mat_prod_count

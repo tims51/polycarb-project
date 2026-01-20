@@ -4,9 +4,9 @@ import streamlit as st
 from datetime import datetime
 import time
 
-# 导入核心模块
-from core.data_manager import DataManager
-from services.bom_service import BOMService
+# 导入服务容器与模型
+from core.container import ServiceContainer
+from schemas.user import UserLogin, UserCreate
 
 # 导入页面模块
 from page_modules.dashboard import render_dashboard
@@ -23,17 +23,6 @@ from utils.ui_manager import render_ui_settings, load_global_css
 
 from components.sidebar import render_sidebar
 
-data_manager = DataManager()
-data_manager.ensure_default_admin()
-
-# -------------------- Service Initialization (Simple DI) --------------------
-if 'services' not in st.session_state:
-    st.session_state.services = {}
-
-# Initialize services if not present
-if 'bom_service' not in st.session_state.services:
-    st.session_state.services['bom_service'] = BOMService(data_manager)
-
 # -------------------- 页面配置 --------------------
 st.set_page_config(
     page_title="聚羧酸减水剂研发管理系统",
@@ -43,8 +32,6 @@ st.set_page_config(
 )
 
 # -------------------- UI 全局设置 --------------------
-# 在页面最顶端加载 CSS，确保样式生效
-# 注意：render_ui_settings 需要在侧边栏中渲染，这里先获取 session_state 的默认值
 if 'ui_font_scale' not in st.session_state:
     st.session_state['ui_font_scale'] = 1.0
 if 'ui_mobile_mode' not in st.session_state:
@@ -55,25 +42,12 @@ load_global_css(
     mobile_optimized=st.session_state['ui_mobile_mode']
 )
 
-# -------------------- 页面路由 --------------------
-PAGE_ROUTES = {
-    "📊 项目概览": lambda: render_dashboard(data_manager),
-    "🧪 实验管理": lambda: render_experiment_management(data_manager),
-    "🏭 SAP/BOM": lambda: render_sap_bom(data_manager),
-    "📦 成品库存": lambda: render_product_inventory_page(data_manager),
-    "🧱 原材料管理": lambda: render_raw_material_management(data_manager),
-    "📝 数据记录": lambda: render_data_recording(data_manager),
-    "💾 数据管理": lambda: render_data_management(data_manager),
-    "📈 数据分析": lambda: render_analysis_page(data_manager),
-    "📄 报告生成": lambda: render_report_page()
-}
-
 def render_report_page():
     """渲染报告生成页面"""
     st.header("📄 报告生成")
     st.info("报告生成页面开发中...")
 
-def render_login_page(data_manager: DataManager):
+def render_login_page(auth_service):
     st.markdown(
         """
         <style>
@@ -122,10 +96,12 @@ def render_login_page(data_manager: DataManager):
             username = st.text_input("用户名", key="login_username_main")
             password = st.text_input("密码", type="password", key="login_password_main")
             if st.button("登录", type="primary", use_container_width=True, key="login_btn_main"):
-                ok, user_info = data_manager.authenticate_user(username, password)
+                # 使用 AuthService 进行认证
+                ok, user_resp = auth_service.authenticate_user(UserLogin(username=username, password=password))
                 if ok:
-                    st.session_state.current_user = user_info
-                    st.success(f"欢迎，{user_info['username']}")
+                    # 转换为字典以兼容现有逻辑
+                    st.session_state.current_user = user_resp.model_dump()
+                    st.success(f"欢迎，{user_resp.username}")
                     time.sleep(0.3)
                     st.rerun()
                 else:
@@ -140,7 +116,8 @@ def render_login_page(data_manager: DataManager):
                 elif new_password != new_password2:
                     st.error("两次输入的密码不一致")
                 else:
-                    ok, msg = data_manager.create_user(new_username, new_password, role="user")
+                    # 使用 AuthService 进行注册
+                    ok, msg = auth_service.create_user(UserCreate(username=new_username, password=new_password, role="user"))
                     if ok:
                         st.success(msg)
                     else:
@@ -148,6 +125,35 @@ def render_login_page(data_manager: DataManager):
 
 def main():
     """主函数"""
+    # 初始化服务容器
+    if 'container' not in st.session_state:
+        st.session_state.container = ServiceContainer()
+        # 确保默认管理员存在
+        st.session_state.container.auth_service.ensure_default_admin()
+        
+    container = st.session_state.container
+
+    # 初始化服务到 session_state (为了兼容旧代码直接从 session_state 获取)
+    if 'services' not in st.session_state:
+        st.session_state.services = {}
+    st.session_state.services['bom_service'] = container.bom_service
+    # 也可以放入其他 service
+    st.session_state.services['inventory_service'] = container.inventory_service
+    st.session_state.services['auth_service'] = container.auth_service
+
+    # 路由配置 - 注入特定服务
+    PAGE_ROUTES = {
+        "📊 项目概览": lambda: render_dashboard(container.data_service),
+        "🧪 实验管理": lambda: render_experiment_management(container.data_service),
+        "🏭 SAP/BOM": lambda: render_sap_bom(container.bom_service, container.inventory_service, container.data_service),
+        "📦 成品库存": lambda: render_product_inventory_page(container.inventory_service),
+        "🧱 原材料管理": lambda: render_raw_material_management(container.inventory_service, container.data_service),
+        "📝 数据记录": lambda: render_data_recording(container.data_service),
+        "💾 数据管理": lambda: render_data_management(container.data_service),
+        "📈 数据分析": lambda: render_analysis_page(container.data_service),
+        "📄 报告生成": lambda: render_report_page()
+    }
+
     if "current_user" not in st.session_state:
         st.session_state.current_user = None
 
@@ -159,21 +165,14 @@ def main():
                 st.rerun()
 
     if not st.session_state.current_user:
-        render_login_page(data_manager)
+        render_login_page(container.auth_service)
         return
 
-    # 传递给 sidebar 的数据服务 wrapper (简单封装以匹配接口)
-    class DataServiceWrapper:
-        def get_all_projects(self): return data_manager.get_all_projects()
-        def get_all_experiments(self): return data_manager.get_all_experiments()
-        def get_all_raw_materials(self): return data_manager.get_all_raw_materials()
-    
-    data_service = DataServiceWrapper()
-    selected_page_func = render_sidebar(data_service, PAGE_ROUTES)
+    # DataService 已经实现了所需接口，直接传递
+    selected_page_func = render_sidebar(container.data_service, PAGE_ROUTES)
     
     # 渲染选中的页面
     if selected_page_func:
-        # 使用容器来渲染页面内容，避免侧边栏重叠
         with st.container():
             selected_page_func()
     

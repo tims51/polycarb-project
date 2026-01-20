@@ -99,6 +99,20 @@ class DataManager:
     def _ensure_backup_dir(self):
         """确保备份目录存在"""
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_next_id(self, items: List[Dict[str, Any]]) -> int:
+        """Safely calculate the next integer ID, ignoring non-integer IDs."""
+        ids = []
+        for item in items:
+            val = item.get("id")
+            if isinstance(val, int):
+                ids.append(val)
+            elif isinstance(val, str) and val.isdigit():
+                try:
+                    ids.append(int(val))
+                except:
+                    pass
+        return max(ids, default=0) + 1
     
     def load_data(self):
         """从JSON文件加载所有数据"""
@@ -378,7 +392,7 @@ class DataManager:
             return False, "用户名已存在"
         data = self.load_data()
         users = data.get(DataCategory.USERS.value, [])
-        new_id = max([u.get("id", 0) for u in users], default=0) + 1
+        new_id = self._get_next_id(users)
         salt = secrets.token_hex(16)
         pwd_hash = self._hash_password(password, salt)
         role_norm = role if role in [UserRole.ADMIN.value, UserRole.USER.value] else UserRole.USER.value
@@ -466,7 +480,7 @@ class DataManager:
     def add_audit_log(self, user, action: str, detail: str):
         data = self.load_data()
         logs = data.get(DataCategory.AUDIT_LOGS.value, [])
-        new_id = max([l.get("id", 0) for l in logs], default=0) + 1
+        new_id = self._get_next_id(logs)
         entry = {
             "id": new_id,
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -491,7 +505,7 @@ class DataManager:
         projects = self.get_all_projects()
         if not projects:
             return 1
-        return max([p.get("id", 0) for p in projects]) + 1
+        return self._get_next_id(projects)
     
     def get_project(self, project_id: int) -> Optional[Dict[str, Any]]:
         """根据ID获取单个项目"""
@@ -507,7 +521,7 @@ class DataManager:
         projects = data.get(DataCategory.PROJECTS.value, [])
         
         # 生成新ID
-        new_id = max([p.get("id", 0) for p in projects], default=0) + 1
+        new_id = self._get_next_id(projects)
         
         if isinstance(project_data, Project):
             project_data.id = new_id
@@ -611,7 +625,7 @@ class DataManager:
         experiments = data.get(DataCategory.EXPERIMENTS.value, [])
         
         # 生成新ID
-        new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
+        new_id = self._get_next_id(experiments)
         
         if isinstance(experiment_data, Experiment):
             experiment_data.id = new_id
@@ -692,7 +706,7 @@ class DataManager:
                     return False, f"原材料名称 '{name}' 已存在"
         
         # 生成新ID
-        new_id = max([m.get("id", 0) for m in materials], default=0) + 1
+        new_id = self._get_next_id(materials)
         
         if isinstance(material_data, RawMaterial):
             material_data.id = new_id
@@ -927,7 +941,7 @@ class DataManager:
 
             # 2. Add Record to Ledger
             records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
-            new_id = max([r.get("id", 0) for r in records], default=0) + 1
+            new_id = self._get_next_id(records)
             
             if isinstance(record_data, InventoryRecord):
                 record_data.id = new_id
@@ -990,7 +1004,7 @@ class DataManager:
         mls = data.get(DataCategory.MOTHER_LIQUORS.value, [])
         
         # 生成新ID
-        new_id = max([m.get("id", 0) for m in mls], default=0) + 1
+        new_id = self._get_next_id(mls)
         
         if isinstance(ml_data, MotherLiquor):
             ml_data.id = new_id
@@ -1068,7 +1082,7 @@ class DataManager:
         records = data.get(DataCategory.SYNTHESIS_RECORDS.value, [])
         
         # 生成新ID
-        new_id = max([r.get("id", 0) for r in records], default=0) + 1
+        new_id = self._get_next_id(records)
         
         if isinstance(record_data, SynthesisRecord):
             record_data.id = new_id
@@ -1139,7 +1153,7 @@ class DataManager:
         products = data.get(DataCategory.PRODUCTS.value, [])
         
         # 生成新ID
-        new_id = max([p.get("id", 0) for p in products], default=0) + 1
+        new_id = self._get_next_id(products)
         
         if isinstance(product_data, Product):
             product_data.id = new_id
@@ -1210,7 +1224,7 @@ class DataManager:
         data = self.load_data()
         boms = data.get(DataCategory.BOMS.value, [])
         
-        new_id = max([b.get("id", 0) for b in boms], default=0) + 1
+        new_id = self._get_next_id(boms)
         
         if isinstance(bom_data, BOM):
             bom_data.id = new_id
@@ -1343,7 +1357,7 @@ class DataManager:
         except Exception:
             user = None
 
-        new_id = max([v.get("id", 0) for v in versions], default=0) + 1
+        new_id = self._get_next_id(versions)
         
         if isinstance(version_data, BOMVersion):
             version_data.id = new_id
@@ -1514,7 +1528,7 @@ class DataManager:
         data = self.load_data()
         orders = data.get(DataCategory.PRODUCTION_ORDERS.value, [])
         
-        new_id = max([o.get("id", 0) for o in orders], default=0) + 1
+        new_id = self._get_next_id(orders)
         
         if isinstance(order_data, ProductionOrder):
             order_data.id = new_id
@@ -1663,7 +1677,7 @@ class DataManager:
         
         # 如果产品不存在，自动创建
         if target_prod_idx == -1:
-            new_prod_id = max([p.get("id", 0) for p in inventory], default=0) + 1
+            new_prod_id = self._get_next_id(inventory)
             new_prod = {
                 "id": new_prod_id,
                 "name": product_name,
@@ -1692,7 +1706,7 @@ class DataManager:
         inventory[target_prod_idx]["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # 记录流水
-        new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+        new_rec_id = self._get_next_id(records)
         records.append({
             "id": new_rec_id,
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -1768,7 +1782,7 @@ class DataManager:
         
         # 3. 生成领料单
         issues = data.get(DataCategory.MATERIAL_ISSUES.value, [])
-        new_id = max([i.get("id", 0) for i in issues], default=0) + 1
+        new_id = self._get_next_id(issues)
         
         # 确保行项目包含 item_type
         for line in lines:
@@ -1897,7 +1911,7 @@ class DataManager:
                                 new_idx = j
                                 break
                         if new_idx == -1 and desired_name:
-                            new_id = max([p.get("id", 0) for p in products], default=0) + 1
+                            new_id = self._get_next_id(products)
                             products.append({
                                 "id": new_id,
                                 "name": desired_name,
@@ -1919,7 +1933,7 @@ class DataManager:
                                 new_idx = j
                                 break
                         if new_idx == -1:
-                            new_id = max([p.get("id", 0) for p in products], default=0) + 1
+                            new_id = self._get_next_id(products)
                             products.append({
                                 "id": new_id,
                                 "name": desired_name,
@@ -1952,7 +1966,7 @@ class DataManager:
                 if normalize_unit(line_uom) != normalize_unit(stock_unit):
                     reason_note += f" (原: {qty}{line_uom})"
                 
-                new_rec_id = max([r.get("id", 0) for r in product_records], default=0) + 1
+                new_rec_id = self._get_next_id(product_records)
                 rel_order_id = target_issue.get("production_order_id")
                 rel_bom_id = None
                 rel_bom_ver = None
@@ -2012,7 +2026,7 @@ class DataManager:
                     if normalize_unit(line_uom) != normalize_unit(stock_unit):
                         reason_note += f" (原: {qty}{line_uom})"
                     
-                    new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+                    new_rec_id = self._get_next_id(records)
                     records.append({
                         "id": new_rec_id,
                         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -2112,7 +2126,7 @@ class DataManager:
                     reason_note = f"撤销领料: {target_issue.get('issue_code')}"
                     if normalize_unit(line_uom) != normalize_unit(stock_unit):
                         reason_note += f" (原: {qty}{line_uom})"
-                    new_rec_id = max([r.get("id", 0) for r in product_records], default=0) + 1
+                    new_rec_id = self._get_next_id(product_records)
                     rel_order_id = target_issue.get("production_order_id")
                     rel_bom_id = None
                     rel_bom_ver = None
@@ -2170,7 +2184,7 @@ class DataManager:
                     if normalize_unit(line_uom) != normalize_unit(stock_unit):
                         reason_note += f" (原: {qty}{line_uom})"
 
-                    new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+                    new_rec_id = self._get_next_id(records)
                     records.append({
                         "id": new_rec_id,
                         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -2273,7 +2287,7 @@ class DataManager:
         experiments = data.get(DataCategory.PASTE_EXPERIMENTS.value, [])
         
         # 生成新ID
-        new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
+        new_id = self._get_next_id(experiments)
         
         if isinstance(experiment_data, PasteExperiment):
             experiment_data.id = new_id
@@ -2335,7 +2349,7 @@ class DataManager:
         experiments = data.get(DataCategory.MORTAR_EXPERIMENTS.value, [])
         
         # 生成新ID
-        new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
+        new_id = self._get_next_id(experiments)
         
         if isinstance(experiment_data, MortarExperiment):
             experiment_data.id = new_id
@@ -2440,7 +2454,7 @@ class DataManager:
                 return False, "库存不足 (产品不存在)"
             
             target_item = {
-                "id": max([p.get("id", 0) for p in inventory], default=0) + 1,
+                "id": self._get_next_id(inventory),
                 "product_name": product_name,
                 "type": product_type,
                 "current_stock": qty,
@@ -2465,7 +2479,7 @@ class DataManager:
                 target_item["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
         # 2. 添加流水记录
-        new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+        new_rec_id = self._get_next_id(records)
         rec_dict["id"] = new_rec_id
         if "created_at" not in rec_dict:
             rec_dict["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2598,7 +2612,7 @@ class DataManager:
         # 检查原材料是否已存在
         mat = next((m for m in materials if str(m.get("name", "")).strip() == str(product_name).strip()), None)
         if not mat:
-            new_id = max([m.get("id", 0) for m in materials], default=0) + 1
+            new_id = self._get_next_id(materials)
             mat = {
                 "id": new_id,
                 "name": product_name,
@@ -2628,7 +2642,7 @@ class DataManager:
                 materials[i]["last_stock_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 break
         # 生成一条台账记录以体现初始同步（adjust_in）
-        new_rec_id = max([r.get("id", 0) for r in records], default=0) + 1
+        new_rec_id = self._get_next_id(records)
         records.append({
             "id": new_rec_id,
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -2728,7 +2742,7 @@ class DataManager:
                 old_idx = find_item_idx(pname, ptype)
                 new_idx = find_item_idx(exp_norm_name, exp_norm_type)
                 if new_idx == -1:
-                    new_id = max([p.get("id", 0) for p in inventory], default=0) + 1
+                    new_id = self._get_next_id(inventory)
                     inventory.append({
                         "id": new_id,
                         "name": exp_norm_name,
@@ -2817,7 +2831,7 @@ class DataManager:
             
             if canonical_item is None:
                 canonical_item = {
-                    "id": max([p.get("id", 0) for p in inventory], default=0) + 1,
+                    "id": self._get_next_id(inventory),
                     "product_name": canonical,
                     "type": "有碱速凝剂" if "有碱速凝剂" in canonical else ("无碱速凝剂" if "无碱速凝剂" in canonical else group_items[0].get("type", ProductCategory.OTHER.value)),
                     "current_stock": 0.0,
@@ -2888,7 +2902,7 @@ class DataManager:
         experiments = data.get(DataCategory.CONCRETE_EXPERIMENTS.value, [])
         
         # 生成新ID
-        new_id = max([e.get("id", 0) for e in experiments], default=0) + 1
+        new_id = self._get_next_id(experiments)
         
         if isinstance(experiment_data, ConcreteExperiment):
             experiment_data.id = new_id
@@ -2956,7 +2970,7 @@ class DataManager:
             new_receipt = receipt_data.copy()
             
         # 生成ID
-        new_id = max([r.get("id", 0) for r in receipts], default=0) + 1
+        new_id = self._get_next_id(receipts)
         new_receipt["id"] = new_id
         
         # 补充默认字段
@@ -3010,7 +3024,7 @@ class DataManager:
             new_order = order_data.copy()
             
         # 生成ID
-        new_id = max([o.get("id", 0) for o in orders], default=0) + 1
+        new_id = self._get_next_id(orders)
         new_order["id"] = new_id
         
         # 补充默认字段

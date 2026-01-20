@@ -4,14 +4,13 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, date, timedelta
 from services.inventory_service import InventoryService
-from core.data_manager import DataManager
 from components.ui_manager import UIManager
 
-def render_product_inventory_page(data_manager: DataManager):
+def render_product_inventory_page(service: InventoryService):
     st.title("📦 成品库存管理")
     
-    # 初始化服务
-    service = InventoryService(data_manager)
+    # Service injected via argument
+
     
     # 侧边栏设置 (如果需要)
     # with st.sidebar:

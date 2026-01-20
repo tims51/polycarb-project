@@ -5,15 +5,10 @@ import uuid
 import io
 from utils.unit_helper import convert_quantity, normalize_unit
 
-def render_sap_bom(data_manager):
+def render_sap_bom(bom_service, inventory_service, data_manager):
     """渲染 SAP/BOM 管理页面"""
     
-    # 获取 Service 实例
-    bom_service = st.session_state.services.get('bom_service')
-    if not bom_service:
-        # Fallback if not initialized (though main.py should handle this)
-        from services.bom_service import BOMService
-        bom_service = BOMService(data_manager)
+    # Services injected via arguments
         
     st.header("🏭 SAP/BOM 管理")
     
@@ -1156,7 +1151,7 @@ def _render_production_management(data_manager, bom_service):
                             if st.button("↩️ 撤销过账 (Cancel)", key=f"cancel_{issue['id']}"):
                                 user = st.session_state.get("current_user")
                                 operator_name = user.get("username") if user else "User"
-                                success, msg = data_manager.cancel_issue_posting(issue['id'], operator=operator_name)
+                                success, msg = inventory_service.cancel_issue_posting(issue['id'], operator=operator_name)
                                 if success:
                                     st.warning(msg)
                                     if user:

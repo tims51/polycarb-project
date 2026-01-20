@@ -370,7 +370,7 @@ def _render_history_restore_section(data_manager):
                     time.sleep(1.5)
                     st.rerun()
 
-def render_raw_material_management(data_manager):
+def render_raw_material_management(inventory_service, data_manager):
     """渲染原材料管理页面"""
     st.header("📦 原材料管理")
     
