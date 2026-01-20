@@ -37,10 +37,15 @@ def batch_delete_experiments_dialog(selected_exp_ids, experiments, data_manager)
             with st.spinner("正在删除选中的实验..."):
                 success_count = 0
                 error_count = 0
-                
+                current_user = st.session_state.get("current_user")
                 for exp_id in selected_exp_ids:
+                    exp_info = next((e for e in experiments if e["id"] == exp_id), None)
+                    name = exp_info["name"] if exp_info else ""
                     if data_manager.delete_experiment(exp_id):
                         success_count += 1
+                        if current_user:
+                            detail = f"删除实验 {name} (ID: {exp_id})"
+                            data_manager.add_audit_log(current_user, "EXPERIMENT_DELETED", detail)
                     else:
                         error_count += 1
                 

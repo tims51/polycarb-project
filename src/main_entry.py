@@ -14,16 +14,16 @@ root_dir = Path(__file__).parent.absolute()
 sys.path.append(str(root_dir))
 
 # Import modular components
-from app.config import APP_NAME, VERSION, PAGE_CONFIG
-from app.services.data_service import DataService
-from app.components.sidebar import render_sidebar
-from app.components.ui_manager import UIManager
-from app.ui.pages.dashboard import render_dashboard
-from app.ui.pages.experiments import render_experiments
-from app.ui.pages.data_entry import render_data_entry
-from app.ui.pages.analysis import render_analysis
-from app.ui.pages.reports import render_reports
-from app.utils.logger import setup_logging
+from config import APP_NAME, VERSION, PAGE_CONFIG
+from services.data_service import DataService
+from components.sidebar import render_sidebar
+from components.ui_manager import UIManager
+from ui.pages.dashboard import render_dashboard
+from ui.pages.experiments import render_experiments
+from ui.pages.data_entry import render_data_entry
+from ui.pages.analysis import render_analysis
+from ui.pages.reports import render_reports
+from utils.logger import setup_logging
 
 # Setup logging
 setup_logging()

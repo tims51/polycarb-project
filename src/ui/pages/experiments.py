@@ -120,9 +120,6 @@ def render_experiments(data_service: DataService):
             
     with col_b2:
         if st.button("🗑️ 删除选中", disabled=len(selected_ids) == 0):
-            if data_service.delete_experiment(selected_ids): # Note: DataService.delete_experiment currently takes single ID. I need to check/update it.
-                 # Actually, let's just loop for now or update DataService later.
-                 pass 
             st.session_state.show_batch_delete = True
 
     # Render List

@@ -14,7 +14,7 @@ def render_data_management(data_manager):
     st.header("💾 数据管理")
     
     user = st.session_state.get("current_user")
-    if not user or user.get("role") != "admin":
+    if not data_manager.has_permission(user, "manage_data"):
         st.info("仅管理员可以访问数据管理与备份功能。")
         return
     
@@ -849,6 +849,8 @@ def _render_backup_tab(data_manager):
             with st.spinner("正在创建备份..."):
                 if data_manager.create_backup():
                     st.success("✅ 备份创建成功！")
+                    user = st.session_state.get("current_user")
+                    data_manager.add_audit_log(user, "BACKUP_CREATED", "立即创建数据备份")
                     time.sleep(1)
                     st.rerun()
                 else:
@@ -859,6 +861,8 @@ def _render_backup_tab(data_manager):
         if st.button("🧹 清理旧备份", use_container_width=True, type="secondary"):
             data_manager._cleanup_old_backups()
             st.success("✅ 备份清理完成")
+            user = st.session_state.get("current_user")
+            data_manager.add_audit_log(user, "BACKUP_CLEANED", "清理旧备份")
             time.sleep(1)
             st.rerun()
     
@@ -922,6 +926,9 @@ def _render_backup_tab(data_manager):
                     try:
                         shutil.copy2(backup_file, data_manager.data_file)
                         st.success("✅ 备份恢复成功！系统将重新加载...")
+                        user = st.session_state.get("current_user")
+                        detail = f"从备份 {backup_file.name} 恢复数据"
+                        data_manager.add_audit_log(user, "BACKUP_RESTORED", detail)
                         time.sleep(2)
                         st.rerun()
                     except Exception as e:
@@ -935,6 +942,9 @@ def _render_backup_tab(data_manager):
                         try:
                             backup_file.unlink()
                             st.success(f"✅ 备份 {backup_file.name} 已删除")
+                            user = st.session_state.get("current_user")
+                            detail = f"删除备份文件 {backup_file.name}"
+                            data_manager.add_audit_log(user, "BACKUP_DELETED", detail)
                             time.sleep(1)
                             st.rerun()
                         except Exception as e:
@@ -970,6 +980,8 @@ def _render_backup_tab(data_manager):
                             file.unlink()
                         except: pass
                     st.success("✅ 所有备份文件已删除")
+                    user = st.session_state.get("current_user")
+                    data_manager.add_audit_log(user, "BACKUP_DELETED_ALL", "删除所有备份文件")
                     time.sleep(2)
                     st.rerun()
 
@@ -981,6 +993,7 @@ def _render_system_settings_tab(data_manager):
     st.subheader("⚙️ 系统设置")
     
     st.markdown("### 系统信息")
+    current_user = st.session_state.get("current_user")
     
     col1, col2, col3 = st.columns(3)
     
@@ -1024,6 +1037,7 @@ def _render_system_settings_tab(data_manager):
                 ok = data_manager.set_admin_password(new_pwd)
                 if ok:
                     st.success("管理员口令已更新")
+                    data_manager.add_audit_log(current_user, "ADMIN_PASSWORD_CHANGED", "管理员口令已更新")
                 else:
                     st.error("保存管理员口令失败")
     
@@ -1045,7 +1059,6 @@ def _render_system_settings_tab(data_manager):
     st.caption("默认情况下，当系统没有管理员用户时，会自动创建用户名为 admin 的管理员账号。其初始密码为环境变量 APP_ADMIN_PASSWORD 的值，如未设置则为 admin。管理员口令仅用于系统设置中的高危操作二次验证，与登录密码相互独立。")
     
     st.markdown("### 🔑 管理员登录密码修改")
-    current_user = st.session_state.get("current_user")
     if not current_user or current_user.get("role") != "admin":
         st.info("仅管理员登录账号可以在此修改登录密码。")
     else:
@@ -1130,6 +1143,17 @@ def _render_system_settings_tab(data_manager):
                                 ok = data_manager.update_user(user_id, fields)
                                 if ok:
                                     st.success("用户信息已更新")
+                                    changes = []
+                                    if "role" in fields:
+                                        changes.append(f"角色: {current_role} -> {fields['role']}")
+                                    if "active" in fields:
+                                        status_before = "启用" if current_active else "停用"
+                                        status_after = "启用" if fields["active"] else "停用"
+                                        changes.append(f"状态: {status_before} -> {status_after}")
+                                    detail = f"修改用户 {username}（ID={user_id}）"
+                                    if changes:
+                                        detail = detail + "；" + "，".join(changes)
+                                    data_manager.add_audit_log(current_user, "USER_UPDATED", detail)
                                     time.sleep(0.3)
                                     st.rerun()
                                 else:
@@ -1167,3 +1191,45 @@ def _render_system_settings_tab(data_manager):
                     st.success("✅ 系统已重置为初始状态")
                     time.sleep(2)
                     st.rerun()
+    
+    st.markdown("### 📜 操作审计日志")
+    logs = data_manager.get_audit_logs()
+    if not logs:
+        st.info("当前还没有审计日志记录。")
+    else:
+        logs_sorted = sorted(logs, key=lambda x: x.get("time", ""), reverse=True)
+        user_names = sorted({(l.get("username") or "系统") for l in logs_sorted})
+        actions = sorted({l.get("action") for l in logs_sorted})
+        col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
+        with col_f1:
+            user_filter = st.selectbox("按用户筛选", ["全部"] + user_names, index=0)
+        with col_f2:
+            action_filter = st.selectbox("按操作类型筛选", ["全部"] + actions, index=0)
+        with col_f3:
+            limit = st.number_input("显示条数", min_value=10, max_value=500, value=200, step=10)
+        filtered = []
+        for item in logs_sorted:
+            name = item.get("username") or "系统"
+            action = item.get("action")
+            if user_filter != "全部" and name != user_filter:
+                continue
+            if action_filter != "全部" and action != action_filter:
+                continue
+            filtered.append(item)
+        filtered = filtered[: int(limit)]
+        if not filtered:
+            st.info("没有满足筛选条件的记录。")
+        else:
+            df_logs = pd.DataFrame(
+                [
+                    {
+                        "时间": item.get("time"),
+                        "用户": item.get("username") or "系统",
+                        "角色": item.get("role") or "",
+                        "操作": item.get("action"),
+                        "详情": item.get("detail"),
+                    }
+                    for item in filtered
+                ]
+            )
+            st.dataframe(df_logs, use_container_width=True, hide_index=True)

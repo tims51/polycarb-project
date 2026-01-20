@@ -33,6 +33,6 @@ echo.
 
 REM 切换到上级目录并启动互联网模式
 cd ..
-python run_internet_mode.py
+python scripts/run_internet_mode.py
 
 pause

@@ -234,6 +234,7 @@ def _render_mother_liquor_tab(data_manager):
                                 st.error("请填写母液名称")
                 else:
                     st.warning("暂无合成实验记录，请先添加合成实验。")
+                    st.form_submit_button("暂无法保存", disabled=True)
 
             elif source_type == "大生产母液":
                 c1, c2 = st.columns(2)
@@ -371,7 +372,10 @@ def _render_mother_liquor_tab(data_manager):
                     source_display = f"外来 ({ml.get('mother_liquor_type', '-')})"
                 elif ml.get('source_type') == 'production':
                     mode = ml.get('production_mode', '未知')
+                    batch = ml.get('batch_number', '')
                     source_display = f"大生产 ({mode})"
+                    if batch:
+                        source_display += f"\n批号: {batch}"
                 c2.write(source_display)
                 
                 c3.write(f"{ml.get('solid_content', '-')}")
@@ -1244,13 +1248,18 @@ def _render_synthesis_experiments_tab(data_manager):
                                     
                                     total_yield = float(record.get('reactor_total_amount', 0)) + float(record.get('a_total_amount', 0)) + float(record.get('b_total_amount', 0))
                                     
+                                    user = st.session_state.get("current_user", None)
                                     ver_data = {
                                         "bom_id": new_bom_id,
                                         "version": "V1", 
                                         "effective_from": datetime.now().strftime("%Y-%m-%d"),
                                         "yield_base": total_yield if total_yield > 0 else 1000.0,
-                                        "lines": lines
+                                        "lines": lines,
+                                        "status": "pending",
                                     }
+                                    if user:
+                                        ver_data["created_by"] = user.get("username")
+                                        ver_data["created_role"] = user.get("role")
                                     data_manager.add_bom_version(ver_data)
                                     st.success(f"BOM 已生成: {bom_data['bom_code']}")
 
@@ -2456,13 +2465,18 @@ def _render_products_list_tab(data_manager, products, raw_materials):
                         
                         total_yield = sum(float(l['qty']) for l in lines)
                         
+                        user = st.session_state.get("current_user", None)
                         ver_data = {
                             "bom_id": new_bom_id,
                             "version": "V1", 
                             "effective_from": datetime.now().strftime("%Y-%m-%d"),
                             "yield_base": total_yield if total_yield > 0 else 1000.0,
-                            "lines": lines
+                            "lines": lines,
+                            "status": "pending",
                         }
+                        if user:
+                            ver_data["created_by"] = user.get("username")
+                            ver_data["created_role"] = user.get("role")
                         data_manager.add_bom_version(ver_data)
                         st.success(f"BOM 已生成: {bom_data['bom_code']}")
 
@@ -2575,6 +2589,7 @@ def _render_recording_experiment_manager(title, type_key, records, update_record
     if "recording_mgmt_id" not in st.session_state:
         st.session_state.recording_mgmt_id = str(uuid.uuid4())[:8]
     mgmt_id = st.session_state.recording_mgmt_id
+    data_manager = getattr(update_record, "__self__", None)
     
     formula_options = sorted({str(r.get("formula_name", "")).strip() for r in normalized_records if str(r.get("formula_name", "")).strip()})
     formula_options = ["全部"] + formula_options
@@ -2718,7 +2733,7 @@ def _render_recording_experiment_manager(title, type_key, records, update_record
         return
     
     headers = ["选择", "ID", "关联配方", "创建时间", "操作人", "操作"]
-    header_cols = st.columns([1, 1, 2.6, 2.2, 1.6, 1.6])
+    header_cols = st.columns([1, 1, 2.6, 2.2, 1.6, 2.4])
     for i, h in enumerate(headers):
         header_cols[i].markdown(f"**{h}**")
     st.divider()
@@ -2753,7 +2768,7 @@ def _render_recording_experiment_manager(title, type_key, records, update_record
         created_at_dt = _dr_safe_parse_datetime(created_at)
         created_at_show = created_at_dt.strftime("%Y-%m-%d %H:%M:%S") if created_at_dt else str(created_at or "")
         
-        row_cols = st.columns([1, 1, 2.6, 2.2, 1.6, 1.6])
+        row_cols = st.columns([1, 1, 2.6, 2.2, 1.6, 2.4])
         with row_cols[0]:
             st.checkbox(
                 "",
@@ -2771,7 +2786,7 @@ def _render_recording_experiment_manager(title, type_key, records, update_record
         with row_cols[4]:
             st.write(str(r.get("operator", "")))
         with row_cols[5]:
-            b1, b2 = st.columns(2)
+            b1, b2, b3 = st.columns(3)
             with b1:
                 if st.button("编辑", key=f"{type_key}_rec_edit_btn_{rid}_{mgmt_id}", use_container_width=True):
                     st.session_state[edit_id_key] = rid
@@ -2782,6 +2797,23 @@ def _render_recording_experiment_manager(title, type_key, records, update_record
                 if st.button(label, key=f"{type_key}_rec_detail_btn_{rid}_{mgmt_id}", use_container_width=True):
                     st.session_state[show_detail_key][rid] = not detail_state
                     st.rerun()
+            with b3:
+                if data_manager and type_key in ("mortar", "concrete"):
+                    export_key = f"{type_key}_rec_export_btn_{rid}_{mgmt_id}"
+                    if st.button("导出", key=export_key, use_container_width=True):
+                        y_max_key = f"{type_key}_chart_y_max"
+                        strength_y_max = st.session_state.get(y_max_key)
+                        chart_type_key = f"{type_key}_chart_type"
+                        chart_type = st.session_state.get(chart_type_key, "line")
+                        link = data_manager.export_experiment_report(
+                            experiment_type=type_key,
+                            experiment_id=rid,
+                            strength_y_max=strength_y_max,
+                            strength_chart_type=chart_type,
+                        )
+                        if link:
+                            st.success("实验报告导出成功")
+                            st.markdown(link, unsafe_allow_html=True)
         
         if st.session_state[show_detail_key].get(rid, False):
             with st.expander(f"记录详情 (ID: {rid})", expanded=True):
@@ -3157,7 +3189,8 @@ def _render_paste_experiments_tab(data_manager):
                 batch = ml.get('batch_number', '')
                 if batch:
                     label += f" (批号:{batch})"
-            paste_formula_options.append(f"母液: {label}")
+            # Include ID for robust matching
+            paste_formula_options.append(f"母液: {label} (ID:{ml['id']})")
 
     # 2. 合成实验选项 (保留以兼容旧数据，或者如果用户仍想直接关联合成记录)
     if synthesis_records:
@@ -4095,6 +4128,29 @@ def _render_mortar_experiments_tab(data_manager):
                     time.sleep(0.5)
                     st.rerun()
     
+    st.markdown("### 导出选项")
+    col_exp1, col_exp2 = st.columns(2)
+    with col_exp1:
+        default_y = float(st.session_state.get("mortar_chart_y_max", 0.0) or 0.0)
+        y_max = st.number_input(
+            "强度曲线Y轴上限(MPa)",
+            min_value=0.0,
+            value=default_y,
+            step=5.0,
+            key="mortar_chart_y_max_input"
+        )
+        st.session_state["mortar_chart_y_max"] = y_max if y_max > 0 else None
+    with col_exp2:
+        default_type = st.session_state.get("mortar_chart_type", "line")
+        default_index = 0 if default_type == "line" else 1
+        chart_label = st.selectbox(
+            "强度图表类型",
+            options=["折线图", "柱状图"],
+            index=default_index,
+            key="mortar_chart_type_select"
+        )
+        st.session_state["mortar_chart_type"] = "line" if chart_label == "折线图" else "bar"
+    
     _render_recording_experiment_manager(
         title="📋 砂浆实验数据列表",
         type_key="mortar",
@@ -4706,6 +4762,29 @@ def _render_concrete_experiments_tab(data_manager):
                         st.rerun()
                     else:
                         st.error("混凝土实验数据保存失败，请重试")
+    
+    st.markdown("### 导出选项")
+    col_exp1, col_exp2 = st.columns(2)
+    with col_exp1:
+        default_y = float(st.session_state.get("concrete_chart_y_max", 0.0) or 0.0)
+        y_max = st.number_input(
+            "强度曲线Y轴上限(MPa)",
+            min_value=0.0,
+            value=default_y,
+            step=5.0,
+            key="concrete_chart_y_max_input"
+        )
+        st.session_state["concrete_chart_y_max"] = y_max if y_max > 0 else None
+    with col_exp2:
+        default_type = st.session_state.get("concrete_chart_type", "line")
+        default_index = 0 if default_type == "line" else 1
+        chart_label = st.selectbox(
+            "强度图表类型",
+            options=["折线图", "柱状图"],
+            index=default_index,
+            key="concrete_chart_type_select"
+        )
+        st.session_state["concrete_chart_type"] = "line" if chart_label == "折线图" else "bar"
     
     _render_recording_experiment_manager(
         title="📋 混凝土实验数据列表",

@@ -164,7 +164,7 @@ def main():
         threading.Thread(target=open_browser_delayed, args=("http://127.0.0.1:8501",), daemon=True).start()
         
         # 启动 Streamlit
-        cmd = [sys.executable, "-m", "streamlit", "run", "app/main.py", "--server.address", "0.0.0.0", "--server.headless", "true"]
+        cmd = [sys.executable, "-m", "streamlit", "run", "src/main.py", "--server.address", "0.0.0.0", "--server.headless", "true"]
         
         try:
             # 运行 Streamlit (阻塞)

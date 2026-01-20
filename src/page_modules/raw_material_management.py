@@ -359,11 +359,225 @@ def render_raw_material_management(data_manager):
                     else:
                         st.warning("数量必须大于0")
 
-    # 原材料列表
     st.divider()
-    st.subheader("📋 原材料列表")
-    
+    st.subheader("📊 库存核对与原材料列表")
     if raw_materials:
+        with st.expander("🔎 原材料库存核对 (以流水为准)", expanded=False):
+            # 1. 基准日期选择
+            col_date, col_desc = st.columns([1, 3])
+            with col_date:
+                # 默认为当月1号
+                today = datetime.now()
+                default_date = datetime(today.year, today.month, 1)
+                benchmark_date = st.date_input("选择基准日期", value=default_date, key="raw_chk_date")
+            with col_desc:
+                st.info(f"系统将计算 {benchmark_date} 之前的累计库存作为**期初库存**，并核算该日期之后的流水变动。")
+
+            records = data_manager.get_inventory_records()
+            rows = []
+            
+            # 定义类型分类
+            # 初始/采购: 基准增加
+            initial_types = ["in", "return_in"]
+            
+            # 生产消耗: 基准减少
+            consume_types = ["consume_out", "out"]
+            
+            # 人工调整
+            adjust_in_types = ["adjust_in"]
+            adjust_out_types = ["adjust_out"]
+            
+            calibration_candidates = []
+            
+            # 将 benchmark_date 转为字符串比较 (YYYY-MM-DD)
+            bench_str = benchmark_date.strftime("%Y-%m-%d")
+            
+            # 用于存储详情数据供后续展示
+            detail_data_map = {}
+            
+            for m in raw_materials:
+                mid = m.get("id")
+                name = m.get("name", "")
+                cur_qty = float(m.get("stock_quantity", 0.0) or 0.0)
+                unit = str(m.get("unit", "kg") or "kg")
+                
+                # 分段累计
+                stock_opening = 0.0 # 期初 ( < bench_str )
+                period_in = 0.0     # 期间采购 ( >= bench_str )
+                period_consume = 0.0 # 期间消耗 ( >= bench_str )
+                period_adjust = 0.0 # 期间调整 ( >= bench_str )
+                
+                # 详情记录
+                period_logs = []
+                
+                for r in records:
+                    if r.get("material_id") != mid:
+                        continue
+                        
+                    qty = float(r.get("quantity", 0.0) or 0.0)
+                    rtype = r.get("type", "")
+                    r_date = r.get("date", "")
+                    
+                    # 判断时间段
+                    is_period = r_date >= bench_str
+                    
+                    if not is_period:
+                        # 期初计算 (所有类型的净值)
+                        if rtype in initial_types + adjust_in_types:
+                            stock_opening += qty
+                        elif rtype in consume_types + adjust_out_types:
+                            stock_opening -= qty
+                    else:
+                        # 期间计算 (分类统计)
+                        if rtype in initial_types:
+                            period_in += qty
+                            period_logs.append({"date": r_date, "type": "采购/入库", "qty": qty, "impact": qty})
+                        elif rtype in consume_types:
+                            period_consume += qty
+                            period_logs.append({"date": r_date, "type": "生产消耗", "qty": qty, "impact": -qty})
+                        elif rtype in adjust_in_types:
+                            period_adjust += qty
+                            period_logs.append({"date": r_date, "type": "调整入库", "qty": qty, "impact": qty})
+                        elif rtype in adjust_out_types:
+                            period_adjust -= qty
+                            period_logs.append({"date": r_date, "type": "调整出库", "qty": qty, "impact": -qty})
+                
+                # 理论库存 = 期初 + 期间采购 - 期间消耗 + 期间调整
+                calculated_stock = stock_opening + period_in - period_consume + period_adjust
+                
+                # 差异 = 当前 - 理论
+                diff = cur_qty - calculated_stock
+                
+                # 转换为显示单位 (吨)
+                def to_ton(v):
+                    val, ok = convert_quantity(v, unit, "ton")
+                    return val if ok else v
+                
+                rows.append({
+                    "名称": name,
+                    f"期初库存({bench_str}前)": round(to_ton(stock_opening), 4),
+                    "期间采购(吨)": round(to_ton(period_in), 4),
+                    "期间消耗(吨)": round(to_ton(period_consume), 4),
+                    "期间调整(吨)": round(to_ton(period_adjust), 4),
+                    "理论库存(吨)": round(to_ton(calculated_stock), 4),
+                    "当前库存(吨)": round(to_ton(cur_qty), 4),
+                    "差额(当前-理论)": round(to_ton(diff), 4),
+                    "单位": "吨"
+                })
+                
+                # 记录详情数据 (注意：详情数据使用原始单位，展示时需转换或说明)
+                # 为简化，这里我们在详情里直接展示吨 (如果单位不是吨，可能需要逐行转换，比较麻烦，暂展示原始单位或尽量转)
+                # 实际上 detail_data_map 最好存储原始值，展示时转换
+                detail_data_map[name] = {
+                    "opening": stock_opening,
+                    "logs": sorted(period_logs, key=lambda x: x["date"]),
+                    "final": calculated_stock,
+                    "unit": unit
+                }
+                
+                # 记录校准候选 (绝对差额 > 0.0001吨)
+                diff_ton = to_ton(diff)
+                if abs(diff_ton) > 0.0001:
+                    calibration_candidates.append({
+                        "id": mid,
+                        "name": name,
+                        "calculated_stock": calculated_stock, # 原始单位
+                        "diff_disp": round(diff_ton, 4)
+                    })
+                
+            if rows:
+                df_chk = pd.DataFrame(rows)
+                df_chk = df_chk.sort_values(by="差额(当前-理论)", key=lambda s: s.abs(), ascending=False)
+                st.dataframe(df_chk, use_container_width=True)
+                
+                # --- 计算明细查询 ---
+                st.markdown("##### 🧾 计算明细查询")
+                all_options = sorted(detail_data_map.keys())
+                if all_options:
+                    sel_detail = st.selectbox("选择原材料查看计算过程", all_options, key="raw_chk_detail_sel")
+                    if sel_detail:
+                        det = detail_data_map[sel_detail]
+                        d_unit = det["unit"]
+                        
+                        st.write(f"**{sel_detail} 计算过程 (基准日: {bench_str})** - 原始单位: {d_unit}")
+                        
+                        detail_rows = []
+                        run_bal = det["opening"]
+                        
+                        # Helper for conversion in detail view
+                        def fmt_val(v):
+                            val_ton, ok = convert_quantity(v, d_unit, "ton")
+                            return f"{val_ton:+.4f}" if ok else f"{v:+.4f}"
+                            
+                        # Period Opening Row
+                        val_ton_open, ok_open = convert_quantity(run_bal, d_unit, "ton")
+                        open_disp = f"{val_ton_open:.4f}" if ok_open else f"{run_bal:.4f}"
+                        
+                        detail_rows.append({
+                            "日期": f"{bench_str} (期初)",
+                            "类型": "期初库存",
+                            "变动数量(吨)" if ok_open else f"变动数量({d_unit})": "-",
+                            "结存(吨)" if ok_open else f"结存({d_unit})": open_disp
+                        })
+                        
+                        for log in det["logs"]:
+                            run_bal += log["impact"]
+                            
+                            val_ton_imp, _ = convert_quantity(log['impact'], d_unit, "ton")
+                            val_ton_bal, _ = convert_quantity(run_bal, d_unit, "ton")
+                            
+                            imp_disp = f"{val_ton_imp:+.4f}" if ok_open else f"{log['impact']:+.4f}"
+                            bal_disp = f"{val_ton_bal:.4f}" if ok_open else f"{run_bal:.4f}"
+                            
+                            detail_rows.append({
+                                "日期": log["date"],
+                                "类型": log["type"],
+                                "变动数量(吨)" if ok_open else f"变动数量({d_unit})": imp_disp,
+                                "结存(吨)" if ok_open else f"结存({d_unit})": bal_disp
+                            })
+                            
+                        st.table(pd.DataFrame(detail_rows))
+                        
+                        final_ton, _ = convert_quantity(det['final'], d_unit, "ton")
+                        final_disp = f"{final_ton:.4f}" if ok_open else f"{det['final']:.4f}"
+                        st.caption(f"注：理论库存 {final_disp} = 期初 + 期间变动累计")
+
+                if calibration_candidates:
+                    st.divider()
+                    st.write("🔧 **一键校准**")
+                    st.info("以下列表显示了当前库存与基于流水的理论库存存在差异的原材料。点击“校准”将把**当前库存**更新为**理论库存**。")
+                    
+                    options = {f"{c['name']} (差额: {c['diff_disp']}吨)": c['id'] for c in calibration_candidates}
+                    selected_ids = st.multiselect("选择要校准的原材料", options=list(options.keys()), default=list(options.keys()))
+                    
+                    if st.button("🛠️ 更新当前库存 (以流水为准)"):
+                        success_count = 0
+                        with st.status("正在执行校准...", expanded=True) as status:
+                            for label in selected_ids:
+                                mid = options[label]
+                                cand = next(c for c in calibration_candidates if c['id'] == mid)
+                                target_balance = cand['calculated_stock']
+                                
+                                # 直接更新主数据库存
+                                success, msg = data_manager.update_inventory_item(mid, {
+                                    "stock_quantity": target_balance,
+                                    "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                })
+                                
+                                if success:
+                                    success_count += 1
+                                    status.write(f"✅ {cand['name']}: 库存已更新")
+                                else:
+                                    status.write(f"❌ {cand['name']}: {msg}")
+                            
+                            if success_count > 0:
+                                status.update(label=f"校准完成！成功更新 {success_count} 个原材料的库存。", state="complete", expanded=False)
+                                import time
+                                time.sleep(1)
+                                st.rerun()
+            else:
+                st.info("暂无可核对的库存数据")
+        st.subheader("📋 原材料列表")
         if "raw_material_edit_id" not in st.session_state:
             st.session_state.raw_material_edit_id = None
         if "raw_material_edit_form_id" not in st.session_state:
@@ -415,6 +629,15 @@ def render_raw_material_management(data_manager):
             # 构造 DataFrame
             df_display = pd.DataFrame(filtered_materials)
             
+            # 将库存统一转换为吨用于展示
+            if "stock_quantity" in df_display.columns:
+                def _to_ton(row):
+                    qty = float(row.get("stock_quantity") or 0.0)
+                    unit = str(row.get("unit") or "kg")
+                    val, ok = convert_quantity(qty, unit, "ton")
+                    return round(val, 4) if ok else round(qty, 4)
+                df_display["stock_quantity"] = df_display.apply(_to_ton, axis=1)
+            
             # 整理列名和显示顺序
             # 必须包含 ID 用于操作，但不需要显示
             # 添加 Select 列用于操作
@@ -424,7 +647,7 @@ def render_raw_material_management(data_manager):
             column_map = {
                 "name": "名称",
                 "material_number": "物料号",
-                "stock_quantity": "库存",
+                "stock_quantity": "库存(吨)",
                 "unit": "单位",
                 "abbreviation": "缩写",
                 "supplier": "供应商",
@@ -607,13 +830,18 @@ def render_raw_material_management(data_manager):
                         water_names = ["水", "自来水", "纯水", "去离子水", "工业用水", "生产用水"]
                         is_water_edit = e_name_val.strip() in water_names
                         
+                        base_stock_qty = float(editing_mat.get("stock_quantity") or 0.0)
+                        base_unit = str(editing_mat.get("unit", "kg") or "kg")
+                        stock_ton_val, stock_ton_ok = convert_quantity(base_stock_qty, base_unit, "ton")
+                        display_stock = stock_ton_val if stock_ton_ok else base_stock_qty
+                        
                         with e_inv_col1:
-                            e_stock = st.number_input(
-                                "当前库存",
+                            e_stock_ton = st.number_input(
+                                "当前库存 (吨)",
                                 min_value=0.0,
                                 step=0.00001,
                                 format="%g",
-                                value=float(editing_mat.get("stock_quantity") or 0.0),
+                                value=display_stock,
                                 key=f"raw_e_stock_{form_uid}"
                             )
                         with e_inv_col2:
@@ -656,17 +884,21 @@ def render_raw_material_management(data_manager):
                                 if e_material_number.strip() in other_numbers:
                                      st.error(f"物料号 '{e_material_number.strip()}' 已存在！")
                                 else:
-                                     # 检查名称+供应商是否重复 (排除自己)
-                                     duplicate_exists = False
-                                     for m in raw_materials:
-                                         if m.get("id") != edit_id:
-                                             if m.get("name") == e_name.strip() and m.get("supplier") == e_supplier.strip():
-                                                 duplicate_exists = True
-                                                 break
-                                     
-                                     if duplicate_exists:
-                                         st.error(f"原材料 '{e_name.strip()}' (供应商: {e_supplier.strip()}) 已存在！")
-                                     else:
+                                    # 检查名称+供应商是否重复 (排除自己)
+                                    duplicate_exists = False
+                                    for m in raw_materials:
+                                        if m.get("id") != edit_id:
+                                            if m.get("name") == e_name.strip() and m.get("supplier") == e_supplier.strip():
+                                                duplicate_exists = True
+                                                break
+                                    
+                                    if duplicate_exists:
+                                        st.error(f"原材料 '{e_name.strip()}' (供应商: {e_supplier.strip()}) 已存在！")
+                                    else:
+                                        target_unit = e_unit.strip() or base_unit
+                                        stock_base, stock_ok = convert_quantity(float(e_stock_ton), "ton", target_unit)
+                                        if not stock_ok:
+                                            stock_base = float(e_stock_ton)
                                         updated_fields = {
                                             "name": e_name.strip(),
                                             "material_number": e_material_number.strip(),
@@ -680,8 +912,8 @@ def render_raw_material_management(data_manager):
                                             "supplier": e_supplier.strip(),
                                             "supplier_rating": e_rating,
                                             "qc_status": e_qc,
-                                            "stock_quantity": float(e_stock),
-                                            "unit": e_unit.strip(),
+                                            "stock_quantity": stock_base,
+                                            "unit": target_unit,
                                             "usage_category": ",".join(e_usage_categories),
                                             "main_usage": e_usage.strip(),
                                         }

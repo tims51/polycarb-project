@@ -25,8 +25,12 @@ def render_sidebar(data_service: DataService, page_routes: Dict[str, Callable]):
     with st.sidebar:
         st.title("导航菜单")
         
-        # Navigation
-        menu_options = list(page_routes.keys())
+        user = st.session_state.get("current_user")
+        menu_options = []
+        for key in page_routes.keys():
+            if key == "💾 数据管理" and (not user or user.get("role") != "admin"):
+                continue
+            menu_options.append(key)
         # Default to the first page if not set
         if "selected_page" not in st.session_state:
             st.session_state.selected_page = menu_options[0]

@@ -8,9 +8,9 @@ APP_DIR = Path(__file__).parent
 ROOT_DIR = APP_DIR.parent
 
 # Data paths
-DATA_FILE = ROOT_DIR / "data.json"
-BACKUP_DIR = ROOT_DIR / "backups"
-TEMP_DIR = ROOT_DIR / "temp"
+DATA_FILE = ROOT_DIR / "data" / "data.json"
+BACKUP_DIR = ROOT_DIR / "data" / "backups"
+TEMP_DIR = ROOT_DIR / "data" / "temp"
 
 # Ensure directories exist
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
