@@ -31,10 +31,20 @@ def start_streamlit():
 def start_cloudflared():
     """Start Cloudflare Tunnel."""
     print("🌐 Starting Cloudflare Tunnel...")
+    
+    # Check for local cloudflared binary in the script directory
+    script_dir = Path(__file__).parent
+    local_binary = script_dir / "cloudflared.exe"
+    
+    cmd = ["cloudflared"]
+    if local_binary.exists():
+        print(f"👉 Using local cloudflared binary: {local_binary}")
+        cmd = [str(local_binary)]
+    
     # cloudflared tunnel --url http://localhost:8501
     try:
         process = subprocess.Popen(
-            ["cloudflared", "tunnel", "--url", "http://localhost:8501"],
+            cmd + ["tunnel", "--url", "http://localhost:8501"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
@@ -43,6 +53,7 @@ def start_cloudflared():
     except FileNotFoundError:
         print("❌ Error: 'cloudflared' not found. Please install Cloudflare Tunnel.")
         print("Download: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/")
+        print(f"Or ensure 'cloudflared.exe' is placed in: {script_dir}")
         sys.exit(1)
 
 def extract_url_from_logs(process, stop_event):
@@ -70,6 +81,12 @@ def extract_url_from_logs(process, stop_event):
                     with open(URL_FILE_PATH, "w") as f:
                         f.write(public_url)
                     print(f"💾 URL saved to {URL_FILE_PATH}")
+                    
+                    # Auto-open in browser if requested
+                    import webbrowser
+                    print(f"🌍 Opening {public_url} in your browser...")
+                    webbrowser.open(public_url)
+                    
                 except Exception as e:
                     print(f"⚠️ Failed to save URL to file: {e}")
                 

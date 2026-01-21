@@ -160,7 +160,11 @@ def _render_batch_import(data_manager):
 
 def _render_stocktake_section(data_manager):
     with st.expander("🔄 库存初始化 / 盘点 (Stocktake)", expanded=False):
-        st.info("此处用于录入原材料的实际库存（盘点值）。系统将自动生成调整记录，以修正当前库存。")
+        st.warning("⚠️ **注意**：本模块仅用于修正**当前时刻**的库存。")
+        st.info("👉 **如需指定日期进行库存初始化或盘点（支持快照回溯与吨位录入），请前往左侧菜单的【数据管理】->【库存盘点】页面操作。**")
+        
+        st.markdown("---")
+        st.caption("以下功能仅供临时修正当前库存使用（不推荐用于正式月结）：")
         
         materials = data_manager.get_all_raw_materials()
         if not materials:
@@ -848,17 +852,19 @@ def render_raw_material_management(inventory_service, data_manager):
                 # 构造 DataFrame
                 df_display = pd.DataFrame(filtered_materials)
                 
-                # 将库存统一转换为吨用于展示
+                # --- 库存显示优化: 转换为吨 ---
                 if "stock_quantity" in df_display.columns:
+                    # 创建副本进行计算，新增 display_stock_t 列
                     def _to_ton(row):
                         qty = float(row.get("stock_quantity") or 0.0)
                         unit = str(row.get("unit") or "kg")
                         val, ok = convert_quantity(qty, unit, "ton")
                         return round(val, 4) if ok else round(qty, 4)
-                    df_display["stock_quantity"] = df_display.apply(_to_ton, axis=1)
+                    
+                    df_display["display_stock_t"] = df_display.apply(_to_ton, axis=1)
+                else:
+                    df_display["display_stock_t"] = 0.0
                 
-                # 整理列名和显示顺序
-                # 必须包含 ID 用于操作，但不需要显示
                 # 添加 Select 列用于操作
                 df_display["选择"] = False
                 
@@ -866,8 +872,8 @@ def render_raw_material_management(inventory_service, data_manager):
                 column_map = {
                     "name": "名称",
                     "material_number": "物料号",
-                    "stock_quantity": "库存(吨)",
-                    "unit": "单位",
+                    "display_stock_t": "当前库存 (吨)",
+                    "unit": "原始单位",
                     "abbreviation": "缩写",
                     "supplier": "供应商",
                     "qc_status": "QC状态",
@@ -876,11 +882,19 @@ def render_raw_material_management(inventory_service, data_manager):
                     "molecular_weight": "分子量",
                     "solid_content": "固含(%)",
                     "unit_price": "单价"
+                    # stock_quantity 不重命名，以便在 config 中引用并隐藏
                 }
                 
-                # 保留需要的列
-                cols_to_show = ["选择", "id"] + [c for c in column_map.keys() if c in df_display.columns]
-                df_display = df_display[cols_to_show]
+                # 调整列顺序
+                # 优先显示: 选择, 名称, 当前库存(吨), 原始单位, 物料号, 供应商, QC状态
+                priority_cols = ["选择", "id", "name", "display_stock_t", "unit", "material_number", "supplier", "qc_status"]
+                other_cols = [c for c in df_display.columns if c not in priority_cols and c != "stock_quantity"]
+                
+                # 确保 stock_quantity 在最后（将被隐藏）
+                final_cols = priority_cols + other_cols + ["stock_quantity"]
+                final_cols = [c for c in final_cols if c in df_display.columns]
+                
+                df_display = df_display[final_cols]
                 
                 # 重命名
                 df_display = df_display.rename(columns=column_map)
@@ -888,53 +902,30 @@ def render_raw_material_management(inventory_service, data_manager):
                 # 配置列
                 column_config = {
                     "id": None, # 隐藏 ID
+                    "stock_quantity": None, # 隐藏原始库存(kg)
                     "选择": st.column_config.CheckboxColumn("选择", help="勾选以进行编辑或删除", width="small"),
                     "名称": st.column_config.TextColumn("名称", width="medium", required=True),
                     "物料号": st.column_config.TextColumn("物料号", width="small"),
-                    "库存": st.column_config.NumberColumn("库存"),
+                    "当前库存 (吨)": st.column_config.NumberColumn(
+                        "当前库存 (吨)", 
+                        format="%.4f", 
+                        help="系统自动转换显示为吨，实际存储为kg"
+                    ),
+                    "原始单位": st.column_config.TextColumn("原始单位", width="small"),
                     "固含(%)": st.column_config.NumberColumn("固含(%)", format="%.1f%%"),
                     "单价": st.column_config.NumberColumn("单价", format="¥%.2f"),
                 }
                 
                 st.caption(f"共找到 {len(filtered_materials)} 条记录。勾选左侧选框进行操作。")
                 
-                # 使用 UIManager 渲染
-                # 注意：render_data_table 是基于 st.dataframe 封装，如果需要 editable，可能需要直接用 data_editor
-                # 但 UIManager.render_data_table 主要是为了移动端视图。
-                # 对于需要操作的表格（如勾选），我们需要特殊的处理。
-                # 这里我们保留 st.data_editor 用于 Desktop，但如果是 Mobile，我们使用 UIManager 的只读视图 + 简化的操作逻辑?
-                # 为了简化，我们假设 UIManager.render_data_table 也可以支持 editor 或者我们在这里做判断。
-                
-                if st.session_state.get('ui_mobile_mode', False):
-                     # Mobile View: Use UIManager's card list
-                     # 但我们失去了勾选功能。对于移动端，可能需要点击卡片进入编辑？
-                     # 这是一个 UX 权衡。为了符合"自动切换为更紧凑的列表视图"的要求，我们使用 render_data_table。
-                     # 但为了保持功能，我们需要一种方式来操作。
-                     # 我们可以让 render_data_table 支持 selection?
-                     # 或者，我们保持 data_editor 但让 UIManager 决定是否显示。
-                     
-                     # 既然用户要求优化 UI，我们使用 UIManager 的 render_data_table 来展示列表。
-                     # 对于操作，我们可能需要另外的方式。
-                     # 为了不破坏现有逻辑，我们这里仅针对"查看"使用 UIManager，但因为这里是管理页，核心是操作。
-                     # 所以我们保留 st.data_editor，但可能需要 UIManager 提供 CSS 优化。
-                     # 不过，我们可以尝试使用 UIManager.render_data_table 的逻辑，如果它是 mobile。
-                     
-                     # 实际上，st.data_editor 在移动端体验尚可。
-                     # 用户要求"自动切换为更紧凑的列表视图"，这通常意味着只读。
-                     # 鉴于此，我们仅在非编辑模式下使用列表视图，或者我们接受移动端只能查看不能批量操作。
-                     # 让我们尝试使用 UIManager.render_data_table (只读) + 单个添加/编辑表单。
-                     # 如果要操作，移动端用户可以使用搜索找到特定项，然后点击"编辑"按钮（我们需要在列表项中嵌入按钮？Streamlit 不太支持）。
-                     
-                     # 妥协方案：使用 st.data_editor，但 UIManager 已经通过 global CSS 优化了其样式。
-                     # 如果必须"列表视图"，我们可能需要重写这部分逻辑。
-                     # 让我们暂时保留 data_editor，因为它提供了必要的交互。
-                     # 但我们在下方添加一个移动端友好的列表视图供查看。
-                     pass
-                
+                # 提示信息：引导用户去正确的地方修改库存
+                st.info("ℹ️ 如需调整库存数量，请使用页面顶部的“库存操作”区域，或前往“数据管理 -> 库存初始化”页面。列表页库存仅供查看。", icon="ℹ️")
+
                 # 正常渲染
                 edited_df = st.data_editor(
                     df_display,
                     column_config=column_config,
+                    # 禁止除了“选择”以外的所有列编辑
                     disabled=[c for c in df_display.columns if c != "选择"],
                     hide_index=True,
                     use_container_width=True,

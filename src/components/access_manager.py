@@ -47,9 +47,9 @@ def check_page_permission(user: dict, page_name: str) -> bool:
     Check if the current user has permission to access the page.
     """
     # Define restricted pages and required roles
-    # For now, only '💾 数据管理' requires admin
+    # Allow users to access Data Management (for Stocktake), but internal tabs will be restricted
     restricted_pages = {
-        "💾 数据管理": ["admin"]
+        # "💾 数据管理": ["admin"]  <-- Removed restriction here
     }
     
     if page_name not in restricted_pages:

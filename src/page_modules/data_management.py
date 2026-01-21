@@ -15,180 +15,193 @@ def render_data_management(data_manager, inventory_service=None):
     st.header("💾 数据管理")
     
     user = st.session_state.get("current_user")
-    if not has_permission(user, "manage_data"):
-        st.info("仅管理员可以访问数据管理与备份功能。")
-        return
-    
-    # 使用标签页组织功能
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🗂️ 实验数据管理",
-        "📤 数据导出", 
-        "📥 数据导入", 
-        "🔙 备份管理",
-        "⚙️ 系统设置",
-        "🔧 库存初始化"
-    ])
-    
-    with tab1:
-        _render_experiment_data_management_tab(data_manager)
-    
-    # 数据导出模块
-    with tab2:
-        _render_export_tab(data_manager)
-    
-    # 数据导入模块
-    with tab3:
-        _render_import_tab(data_manager)
-    
-    # 备份管理模块
-    with tab4:
-        _render_backup_tab(data_manager)
-    
-    # 系统设置模块
-    with tab5:
-        _render_system_settings_tab(data_manager)
-
-    # 库存初始化模块
-    with tab6:
-        if inventory_service:
-            render_inventory_initialization_tab(inventory_service)
-        else:
-            st.warning("Inventory Service Not Available")
-
-def render_inventory_initialization_tab(inventory_service):
-    """库存初始化/盘点模块"""
-    st.subheader("🔧 库存初始化与盘点")
-    
-    user = st.session_state.get("current_user")
-    if user.get("role") != "admin":
-        st.error("需要管理员权限才能进行库存初始化操作。")
+    if not user:
+        st.error("请先登录。")
         return
 
-    st.info(
-        """
-        **功能说明**：
-        - 此功能用于设置或校准指定日期的库存余额。
-        - 系统显示的库存为**所选日期结束时**的理论库存。
-        - 您输入的【实际盘点库存】将作为该日期结束时的最终库存。
-        - 系统会自动生成【调整入库】或【调整出库】记录来补齐差异。
-        """
-    )
-
-    col1, col2, col3 = st.columns([2, 2, 1])
-    with col1:
-        # Use a consistent key to maintain state, defaulting to session state or today
-        default_date = st.session_state.get('inventory_snapshot_date')
-        if not default_date:
-            default_date = datetime.now().date()
-            
-        target_date = st.date_input(
-            "选择初始化/盘点日期", 
-            value=default_date,
-            key="inventory_stocktake_date_picker"
-        )
-    with col2:
-        reason_input = st.text_input("调整原因/备注", value="库存初始化/盘点")
+    is_admin = user.get("role") == "admin"
     
-    if st.button("📥 加载/刷新库存快照", type="primary"):
-        snapshot = inventory_service.get_stock_snapshot_at_date(target_date.strftime("%Y-%m-%d"))
-        st.session_state['inventory_snapshot_data'] = pd.DataFrame(snapshot)
-        st.session_state['inventory_snapshot_date'] = target_date
-        # 重置编辑器的key以强制刷新
-        st.session_state['inventory_editor_key'] = f"inv_editor_{uuid.uuid4()}"
-        st.rerun()
-
-    if 'inventory_snapshot_data' in st.session_state:
-        df = st.session_state['inventory_snapshot_data']
-        current_date = st.session_state.get('inventory_snapshot_date')
+    # 根据权限动态生成 Tabs
+    if is_admin:
+        tab_names = [
+            "🗂️ 实验数据管理",
+            "📤 数据导出", 
+            "📥 数据导入", 
+            "🔙 备份管理",
+            "⚙️ 系统设置",
+            "🔧 库存盘点"
+        ]
+        tabs = st.tabs(tab_names)
         
-        # 简单的校验，防止日期不匹配
-        if current_date != target_date:
-            st.warning(f"⚠️ 当前显示的是 {current_date} 的数据，请重新点击加载按钮以获取 {target_date} 的数据。")
-        
-        st.markdown(f"### 📅 盘点日期: {current_date}")
-        
-        # 过滤器
-        filter_col1, filter_col2 = st.columns([3, 1])
-        with filter_col1:
-            search_term = st.text_input("🔍 搜索原材料名称", key="inv_init_search")
-        with filter_col2:
-            hide_zero = st.checkbox("隐藏零库存", value=False)
-
-        # 过滤显示
-        display_df = df.copy()
-        if "actual_stock" not in display_df.columns:
-            display_df["actual_stock"] = display_df["system_stock"]
-
-        if search_term:
-            display_df = display_df[display_df["material_name"].str.contains(search_term, case=False, na=False)]
-        
-        if hide_zero:
-            display_df = display_df[(display_df["system_stock"] != 0) | (display_df["actual_stock"] != 0)]
-
-        # 统计信息
-        st.caption(f"共显示 {len(display_df)} / {len(df)} 种原材料")
-
-        column_config = {
-            "material_id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
-            "material_name": st.column_config.TextColumn("原材料名称", disabled=True, width="medium"),
-            "unit": st.column_config.TextColumn("单位", disabled=True, width="small"),
-            "system_stock": st.column_config.NumberColumn("系统账面库存", disabled=True, format="%.4f"),
-            "actual_stock": st.column_config.NumberColumn("实际盘点库存", required=True, format="%.4f", min_value=0, step=0.01)
-        }
-
-        # 使用 dynamic key 确保重置
-        editor_key = st.session_state.get('inventory_editor_key', "inventory_editor_default")
-        
-        edited_display_df = st.data_editor(
-            display_df,
-            column_config=column_config,
-            use_container_width=True,
-            hide_index=True,
-            key=editor_key
-        )
-
-        if st.button("💾 确认修正并保存", type="primary"):
-            # 注意：st.data_editor 只返回当前显示部分的编辑结果
-            # 我们需要将编辑结果合并回原始 df，或者只处理 edited_display_df
-            # 这里直接处理 edited_display_df 即可，因为用户只能保存他们看到和修改的
-            # 但更严谨的做法是：如果在 display_df 中修改了，就应用。
-            
-            adjustments = []
-            
-            for index, row in edited_display_df.iterrows():
-                sys_stock = float(row.get("system_stock", 0.0))
-                act_stock = float(row.get("actual_stock", 0.0))
-                
-                if abs(sys_stock - act_stock) > 1e-6:
-                    adjustments.append({
-                        "material_id": int(row["material_id"]),
-                        "actual_stock": act_stock
-                    })
-            
-            if not adjustments:
-                st.info("没有检测到库存差异，无需保存。")
+        with tabs[0]:
+            _render_experiment_data_management_tab(data_manager)
+        with tabs[1]:
+            _render_export_tab(data_manager)
+        with tabs[2]:
+            _render_import_tab(data_manager)
+        with tabs[3]:
+            _render_backup_tab(data_manager)
+        with tabs[4]:
+            _render_system_settings_tab(data_manager)
+        with tabs[5]:
+            if inventory_service:
+                _render_inventory_init_tab(inventory_service)
             else:
-                operator = user.get("username", "Admin")
-                date_str = current_date.strftime("%Y-%m-%d")
-                final_reason = f"{reason_input} (日期: {date_str})"
+                st.warning("⚠️ InventoryService 未注入，无法使用库存盘点功能。请检查 main.py。")
+    else:
+        # 普通用户：仅显示库存盘点功能 (假设普通用户有盘点权限，或者至少能看到入口)
+        # 如果未来有更多功能开放给普通用户，可以在这里添加
+        st.info("ℹ️ 您当前处于普通用户模式，仅显示您有权操作的模块。")
+        
+        tab_names = ["🔧 库存盘点"]
+        tabs = st.tabs(tab_names)
+        
+        with tabs[0]:
+            if inventory_service:
+                _render_inventory_init_tab(inventory_service)
+            else:
+                st.warning("⚠️ InventoryService 未注入，无法使用库存盘点功能。")
+
+def _render_inventory_init_tab(inventory_service):
+    """渲染库存初始化/盘点标签页 (修复版：状态锁定 + 吨位显示)"""
+    st.subheader("🔧 库存初始化与盘点 (Stocktake)")
+    st.info("💡 说明：此处用于修正系统的【理论库存】。操作流程：选择日期 -> 加载快照 -> 输入实际吨数 -> 提交。")
+    
+    # --- 1. 初始化 Session State (防止刷新丢失) ---
+    if 'stocktake_snapshot' not in st.session_state:
+        st.session_state.stocktake_snapshot = None
+    # 注意：st.date_input 如果绑定了 key，会自动在 session_state 中维护该 key
+    if 'stocktake_target_date' not in st.session_state:
+        st.session_state.stocktake_target_date = datetime.now().date()
+
+    # --- 2. 顶部操作区 ---
+    with st.container():
+        col1, col2 = st.columns([2, 3])
+        with col1:
+            # 使用 key 直接绑定 session_state，确保双向绑定，解决无法选择日期的问题
+            st.date_input(
+                "📅 1. 选择盘点日期",
+                key="stocktake_target_date"
+            )
+            selected_date = st.session_state.stocktake_target_date
+            
+        with col2:
+            st.write("") # 布局占位
+            st.write("")
+            # 加载按钮 (只有点击这个，才会去后端拉新数据并刷新缓存)
+            if st.button("📥 2. 加载库存快照", type="primary"):
+                # selected_date 自动为最新值，无需手动赋值
                 
-                with st.spinner(f"正在保存 {len(adjustments)} 条库存调整记录..."):
-                    success, msg = inventory_service.adjust_inventory_batch(
-                        adjustments, 
-                        date_str, 
-                        operator_name=operator, 
-                        custom_reason=f"{reason_input} (日期: {date_str})"
-                    )
+                with st.spinner(f"正在计算 {selected_date} 的理论库存..."):
+                    # 调用后端获取数据 (注意：后端返回的是 kg)
+                    raw_data = inventory_service.get_stock_snapshot_at_date(str(selected_date))
                     
-                    if success:
-                        st.success(f"✅ {msg}")
-                        # Clear state to force reload next time
-                        if 'inventory_snapshot_data' in st.session_state:
-                            del st.session_state['inventory_snapshot_data']
-                        time.sleep(1)
-                        st.rerun()
+                    # 转换为 DataFrame
+                    df = pd.DataFrame(raw_data)
+                    if not df.empty:
+                        # 核心逻辑：前端只看“吨”，后端只存“kg”
+                        # 1. 计算【账面库存(吨)】
+                        df['system_stock_t'] = df['system_stock'].apply(lambda x: float(x) / 1000.0)
+                        
+                        # 2. 初始化【实际库存(吨)】，默认等于账面库存
+                        df['actual_stock_t'] = df['system_stock_t']
+                        
+                        # 3. 保留原始 kg 数据备查 (隐藏列)
+                        df['system_stock_kg'] = df['system_stock']
+                    
+                    # 存入 Session State
+                    st.session_state.stocktake_snapshot = df
+                    st.rerun()
+
+    st.divider()
+
+    # --- 3. 编辑区域 ---
+    if st.session_state.stocktake_snapshot is not None:
+        df_snapshot = st.session_state.stocktake_snapshot
+        target_date_str = str(st.session_state.stocktake_target_date)
+        
+        st.markdown(f"### 📋 {target_date_str} 库存盘点表")
+        
+        if df_snapshot.empty:
+            st.warning("该日期前无原材料记录。")
+        else:
+            # 显示可编辑表格
+            edited_df = st.data_editor(
+                df_snapshot,
+                column_config={
+                    "material_name": st.column_config.TextColumn("原材料名称", disabled=True),
+                    "unit": st.column_config.TextColumn("基础单位", disabled=True),
+                    # 显示列：吨
+                    "system_stock_t": st.column_config.NumberColumn(
+                        "💻 账面库存 (吨)",
+                        format="%.4f t",
+                        disabled=True,
+                        help="系统根据历史记录计算出的理论库存"
+                    ),
+                    "actual_stock_t": st.column_config.NumberColumn(
+                        "📝 实际库存 (吨)",
+                        format="%.4f t",
+                        min_value=0.0,
+                        step=0.001,
+                        required=True,
+                        help="请输入仓库实际盘点的吨数"
+                    ),
+                    # 隐藏列：KG (不显示，但数据还在)
+                    "material_id": st.column_config.TextColumn(hidden=True),
+                    "system_stock": st.column_config.NumberColumn(hidden=True),
+                    "system_stock_kg": st.column_config.NumberColumn(hidden=True),
+                },
+                column_order=["material_id", "material_name", "system_stock_t", "actual_stock_t"],
+                hide_index=True,
+                use_container_width=True,
+                key="stocktake_editor_final"
+            )
+
+            # --- 4. 提交保存 ---
+            st.write("")
+            col_submit, _ = st.columns([1, 4])
+            with col_submit:
+                if st.button("💾 3. 确认并修正库存 (提交)", type="primary"):
+                    adjustments = []
+                    
+                    # 遍历表格，找出差异
+                    for _, row in edited_df.iterrows():
+                        # 【关键】将用户输入的“吨”转回“kg”进行计算
+                        actual_kg = float(row['actual_stock_t']) * 1000.0
+                        system_kg = float(row['system_stock_kg'])
+                        
+                        # 差异超过 0.01kg (10克) 才记录
+                        if abs(actual_kg - system_kg) > 0.01:
+                            adjustments.append({
+                                "material_id": row['material_id'],
+                                "material_name": row['material_name'],
+                                "actual_stock": actual_kg, # 传给后端的是 kg
+                                "diff_kg": actual_kg - system_kg
+                            })
+                    
+                    if not adjustments:
+                        st.info("数据与账面一致，无变化。")
                     else:
-                        st.error(f"❌ {msg}")
+                        try:
+                            # 调用后端批量调整
+                            user = st.session_state.get("current_user", {})
+                            operator = user.get("username", "admin")
+                            
+                            inventory_service.adjust_inventory_batch(
+                                adjustments,
+                                target_date_str,
+                                f"盘点修正 ({operator})"
+                            )
+                            
+                            st.success(f"✅ 成功修正 {len(adjustments)} 项库存！调整单已生成。")
+                            # 清空缓存，强制下次重新加载
+                            st.session_state.stocktake_snapshot = None
+                            time.sleep(2)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"提交失败: {str(e)}")
+    else:
+        st.info("👈 请先在左上方选择日期，并点击【加载库存快照】开始盘点。")
 
 
 def _render_experiment_data_management_tab(data_manager):
