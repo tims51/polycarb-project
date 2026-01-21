@@ -22,6 +22,7 @@ def render_product_inventory_page(service: InventoryService):
     # ==================== Tab 1: 监控看板 ====================
     with tab_dashboard:
         summary = service.get_inventory_summary(low_stock_threshold=10.0)
+        dist_df = summary['stock_distribution']
         
         # 1. KPI Cards
         kpi1, kpi2, kpi3 = st.columns(3)
@@ -37,20 +38,54 @@ def render_product_inventory_page(service: InventoryService):
         
         st.markdown("---")
         
-        # 2. 库存分布图表 (提前)
-        st.subheader("📈 库存分布")
-        dist_df = summary['stock_distribution']
-        if not dist_df.empty:
-            fig = px.bar(
-                dist_df, 
-                x="product_name", 
-                y="current_stock", 
-                color="type",
-                text_auto='.2f',
-                title="各产品当前库存 (吨)",
-                labels={"product_name": "产品", "current_stock": "库存(吨)", "type": "类型"}
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        # 2. 库存分布看板
+        st.subheader("📊 库存分布看板")
+        inventory_data = service.get_products()
+        
+        if inventory_data:
+            df_inv = pd.DataFrame(inventory_data)
+            # 兼容字段名：stock_quantity 或 current_stock
+            if "stock_quantity" not in df_inv.columns and "current_stock" in df_inv.columns:
+                df_inv["stock_quantity"] = df_inv["current_stock"]
+            
+            # 确保数字列为 float
+            df_inv["stock_quantity"] = pd.to_numeric(df_inv["stock_quantity"], errors='coerce').fillna(0.0)
+            
+            # 聚合：按产品名称汇总库存，确保同名项合并
+            df_chart = df_inv.groupby("product_name", as_index=False)["stock_quantity"].sum()
+            # 过滤：只显示有库存的产品 (> 0.001 吨)
+            df_chart = df_chart[df_chart["stock_quantity"] > 0.001]
+            
+            if not df_chart.empty:
+                c1, c2 = st.columns(2)
+                with c1:
+                    # 饼图：占比
+                    fig_pie = px.pie(
+                        df_chart,
+                        values='stock_quantity',
+                        names='product_name',
+                        title='库存占比分布',
+                        hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    )
+                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                
+                with c2:
+                    # 柱状图：绝对值
+                    fig_bar = px.bar(
+                        df_chart,
+                        x='product_name',
+                        y='stock_quantity',
+                        title='当前库存量 (吨)',
+                        text_auto='.2f',
+                        color='stock_quantity',
+                        color_continuous_scale='Blues',
+                        labels={'product_name': '产品名称', 'stock_quantity': '库存(吨)'}
+                    )
+                    st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.info("当前无库存产品 (库存均为 0)")
         else:
             st.info("暂无库存数据")
 
