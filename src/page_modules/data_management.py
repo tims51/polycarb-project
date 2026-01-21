@@ -76,7 +76,16 @@ def render_inventory_initialization_tab(inventory_service):
 
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
-        target_date = st.date_input("选择初始化/盘点日期", value=datetime.now().date())
+        # Use a consistent key to maintain state, defaulting to session state or today
+        default_date = st.session_state.get('inventory_snapshot_date')
+        if not default_date:
+            default_date = datetime.now().date()
+            
+        target_date = st.date_input(
+            "选择初始化/盘点日期", 
+            value=default_date,
+            key="inventory_stocktake_date_picker"
+        )
     with col2:
         reason_input = st.text_input("调整原因/备注", value="库存初始化/盘点")
     
