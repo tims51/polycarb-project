@@ -282,41 +282,52 @@ def render_product_inventory_page(service: InventoryService):
         )
         
         if not df_records.empty:
-            # 字段映射优化显示
+            df = df_records.copy()
+            
+            # 1. 填充空缺的结存，避免 nan
+            if "snapshot_stock" not in df.columns:
+                df["snapshot_stock"] = None
+            df["snapshot_stock"] = df["snapshot_stock"].apply(lambda x: f"{x:.4f}" if pd.notnull(x) and isinstance(x, (int, float)) else "-")
+            
+            # 2. 确保有时间字段 (如果没有 created_at 就用 date 补)
+            if "created_at" not in df.columns:
+                df["created_at"] = df.get("date", "")
+            
+            # 3. 整理显示列
             display_cols = {
-                "date": "日期",
-                "product_name": "产品名称",
-                "type": "变动类型",
-                "quantity": "数量",
-                "snapshot_stock": "结存",
-                "reason": "摘要/批号",
-                "operator": "操作人"
+                "created_at": "🕒 发生时间",
+                "product_name": "📦 产品名称",
+                "type": "🔄 变动类型",
+                "quantity": "🔢 变动数量",
+                "snapshot_stock": "💰 结存快照",
+                "reason": "📝 备注/关联单据",
+                "operator": "👤 操作人"
             }
             
-            # 确保所有列都存在，防止 KeyError
-            for col in display_cols.keys():
-                if col not in df_records.columns:
-                    df_records[col] = None
+            # 过滤掉不存在的列
+            valid_cols = [c for c in display_cols.keys() if c in df.columns]
+            df_show = df[valid_cols].rename(columns=display_cols)
             
-            # 格式化
-            df_display = df_records[display_cols.keys()].rename(columns=display_cols)
-            
-            UIManager.render_data_table(
-                df_display, 
-                mobile_cols=["产品名称", "变动类型", "数量", "结存"],
-                hide_index=True,
+            # 4. 渲染表格
+            st.dataframe(
+                df_show,
+                use_container_width=True,
                 column_config={
-                    "数量": st.column_config.NumberColumn("数量", format="%.5f"),
-                    "结存": st.column_config.NumberColumn("结存", format="%.5f"),
-                }
+                    "🕒 发生时间": st.column_config.TextColumn("🕒 发生时间"), # 保持字符串格式以显示秒
+                    "🔄 变动类型": st.column_config.TextColumn("🔄 变动类型"),
+                    "🔢 变动数量": st.column_config.NumberColumn("🔢 变动数量", format="%.4f"),
+                    "💰 结存快照": st.column_config.TextColumn("💰 结存快照"), # 设为Text以兼容 "-" 字符
+                },
+                height=500,
+                hide_index=True
             )
             
             # 导出
-            csv = df_display.to_csv(index=False).encode('utf-8-sig')
+            csv = df_show.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 "📥 导出查询结果 (CSV)",
                 csv,
-                "inventory_report.csv",
+                f"inventory_report_{date.today()}.csv",
                 "text/csv",
                 key='download-csv'
             )
