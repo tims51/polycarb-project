@@ -1,5 +1,5 @@
 from typing import Optional, List, Union
-from datetime import datetime, date
+from datetime import datetime, date as DateType
 from pydantic import Field, field_validator
 
 from core.enums import StockMovementType, UnitType, ProductCategory, MaterialType
@@ -32,6 +32,14 @@ class InventoryRecordBase(BaseSchema):
     snapshot_stock: Optional[float] = Field(None, description="变动后快照库存")
     related_doc_type: Optional[str] = Field(None, description="关联单据类型")
     related_doc_id: Optional[int] = Field(None, description="关联单据ID")
+
+    @field_validator('quantity')
+    @classmethod
+    def quantity_must_be_positive(cls, v):
+        if v <= 0:
+            raise ValueError('数量必须为正数')
+        return v
+
 
 class InventoryRecordCreate(InventoryRecordBase):
     pass
@@ -72,7 +80,7 @@ class ProductInventoryRecordBase(BaseSchema):
     operator: str
     snapshot_stock: Optional[float] = None
     batch_number: Optional[str] = None
-    date: Union[date, str] = Field(default_factory=lambda: datetime.now().date())
+    date: Union[DateType, str] = Field(default_factory=lambda: datetime.now().date())
 
     @field_validator('date', mode='before')
     @classmethod

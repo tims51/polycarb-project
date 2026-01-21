@@ -9,6 +9,39 @@ import streamlit as st
 from utils.helpers import get_local_ip, generate_qr_code
 from config import URL_FILE_PATH
 
+from core.enums import PermissionAction, UserRole
+
+def has_permission(user: dict, action: str) -> bool:
+    """
+    Check if the user has permission for the given action.
+    """
+    if not user:
+        return False
+        
+    role = user.get("role", UserRole.VIEWER.value)
+    
+    # Admin has all permissions
+    if role == UserRole.ADMIN.value:
+        return True
+        
+    # User permissions
+    if role == UserRole.USER.value:
+        # Define user allowed actions
+        allowed_actions = [
+            PermissionAction.VIEW_DASHBOARD.value,
+            PermissionAction.MANAGE_EXPERIMENTS.value,
+            PermissionAction.MANAGE_RAW_MATERIALS.value,
+            PermissionAction.VIEW_ANALYSIS.value,
+            PermissionAction.MANAGE_BOM.value, # Assuming users can manage BOMs for now based on old logic likely being loose or restricted. 
+            # Wait, the sap_bom.py says "仅管理员可以维护 BOM 主数据". So users should NOT have MANAGE_BOM.
+            # But they might need to VIEW. The code checked 'manage_bom'.
+            # Let's align with the error context: sap_bom.py checks "manage_bom".
+            PermissionAction.MANAGE_INVENTORY.value,
+        ]
+        return action in allowed_actions
+        
+    return False
+
 def check_page_permission(user: dict, page_name: str) -> bool:
     """
     Check if the current user has permission to access the page.

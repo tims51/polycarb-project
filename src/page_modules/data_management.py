@@ -8,23 +8,25 @@ import shutil
 from pathlib import Path
 import json
 import uuid
+from components.access_manager import has_permission
 
-def render_data_management(data_manager):
+def render_data_management(data_manager, inventory_service=None):
     """渲染数据管理页面"""
     st.header("💾 数据管理")
     
     user = st.session_state.get("current_user")
-    if not data_manager.has_permission(user, "manage_data"):
+    if not has_permission(user, "manage_data"):
         st.info("仅管理员可以访问数据管理与备份功能。")
         return
     
     # 使用标签页组织功能
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🗂️ 实验数据管理",
         "📤 数据导出", 
         "📥 数据导入", 
         "🔙 备份管理",
-        "⚙️ 系统设置"
+        "⚙️ 系统设置",
+        "🔧 库存初始化"
     ])
     
     with tab1:
@@ -45,6 +47,140 @@ def render_data_management(data_manager):
     # 系统设置模块
     with tab5:
         _render_system_settings_tab(data_manager)
+
+    # 库存初始化模块
+    with tab6:
+        if inventory_service:
+            render_inventory_initialization_tab(inventory_service)
+        else:
+            st.warning("Inventory Service Not Available")
+
+def render_inventory_initialization_tab(inventory_service):
+    """库存初始化/盘点模块"""
+    st.subheader("🔧 库存初始化与盘点")
+    
+    user = st.session_state.get("current_user")
+    if user.get("role") != "admin":
+        st.error("需要管理员权限才能进行库存初始化操作。")
+        return
+
+    st.info(
+        """
+        **功能说明**：
+        - 此功能用于设置或校准指定日期的库存余额。
+        - 系统显示的库存为**所选日期结束时**的理论库存。
+        - 您输入的【实际盘点库存】将作为该日期结束时的最终库存。
+        - 系统会自动生成【调整入库】或【调整出库】记录来补齐差异。
+        """
+    )
+
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        target_date = st.date_input("选择初始化/盘点日期", value=datetime.now().date())
+    with col2:
+        reason_input = st.text_input("调整原因/备注", value="库存初始化/盘点")
+    
+    if st.button("📥 加载/刷新库存快照", type="primary"):
+        snapshot = inventory_service.get_stock_snapshot_at_date(target_date.strftime("%Y-%m-%d"))
+        st.session_state['inventory_snapshot_data'] = pd.DataFrame(snapshot)
+        st.session_state['inventory_snapshot_date'] = target_date
+        # 重置编辑器的key以强制刷新
+        st.session_state['inventory_editor_key'] = f"inv_editor_{uuid.uuid4()}"
+        st.rerun()
+
+    if 'inventory_snapshot_data' in st.session_state:
+        df = st.session_state['inventory_snapshot_data']
+        current_date = st.session_state.get('inventory_snapshot_date')
+        
+        # 简单的校验，防止日期不匹配
+        if current_date != target_date:
+            st.warning(f"⚠️ 当前显示的是 {current_date} 的数据，请重新点击加载按钮以获取 {target_date} 的数据。")
+        
+        st.markdown(f"### 📅 盘点日期: {current_date}")
+        
+        # 过滤器
+        filter_col1, filter_col2 = st.columns([3, 1])
+        with filter_col1:
+            search_term = st.text_input("🔍 搜索原材料名称", key="inv_init_search")
+        with filter_col2:
+            hide_zero = st.checkbox("隐藏零库存", value=False)
+
+        # 过滤显示
+        display_df = df.copy()
+        if "actual_stock" not in display_df.columns:
+            display_df["actual_stock"] = display_df["system_stock"]
+
+        if search_term:
+            display_df = display_df[display_df["material_name"].str.contains(search_term, case=False, na=False)]
+        
+        if hide_zero:
+            display_df = display_df[(display_df["system_stock"] != 0) | (display_df["actual_stock"] != 0)]
+
+        # 统计信息
+        st.caption(f"共显示 {len(display_df)} / {len(df)} 种原材料")
+
+        column_config = {
+            "material_id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
+            "material_name": st.column_config.TextColumn("原材料名称", disabled=True, width="medium"),
+            "unit": st.column_config.TextColumn("单位", disabled=True, width="small"),
+            "system_stock": st.column_config.NumberColumn("系统账面库存", disabled=True, format="%.4f"),
+            "actual_stock": st.column_config.NumberColumn("实际盘点库存", required=True, format="%.4f", min_value=0, step=0.01)
+        }
+
+        # 使用 dynamic key 确保重置
+        editor_key = st.session_state.get('inventory_editor_key', "inventory_editor_default")
+        
+        edited_display_df = st.data_editor(
+            display_df,
+            column_config=column_config,
+            use_container_width=True,
+            hide_index=True,
+            key=editor_key
+        )
+
+        if st.button("💾 确认修正并保存", type="primary"):
+            # 注意：st.data_editor 只返回当前显示部分的编辑结果
+            # 我们需要将编辑结果合并回原始 df，或者只处理 edited_display_df
+            # 这里直接处理 edited_display_df 即可，因为用户只能保存他们看到和修改的
+            # 但更严谨的做法是：如果在 display_df 中修改了，就应用。
+            
+            adjustments = []
+            
+            for index, row in edited_display_df.iterrows():
+                sys_stock = float(row.get("system_stock", 0.0))
+                act_stock = float(row.get("actual_stock", 0.0))
+                
+                if abs(sys_stock - act_stock) > 1e-6:
+                    adjustments.append({
+                        "material_id": int(row["material_id"]),
+                        "actual_stock": act_stock
+                    })
+            
+            if not adjustments:
+                st.info("没有检测到库存差异，无需保存。")
+            else:
+                operator = user.get("username", "Admin")
+                date_str = current_date.strftime("%Y-%m-%d")
+                final_reason = f"{reason_input} (日期: {date_str})"
+                
+                with st.spinner(f"正在保存 {len(adjustments)} 条库存调整记录..."):
+                    success, msg = inventory_service.adjust_inventory_batch(
+                        adjustments, 
+                        date_str, 
+                        operator_name=operator, 
+                        custom_reason=f"{reason_input} (日期: {date_str})"
+                    )
+                    
+                    if success:
+                        st.success(f"✅ {msg}")
+                        # Clear state to force reload next time
+                        if 'inventory_snapshot_data' in st.session_state:
+                            del st.session_state['inventory_snapshot_data']
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {msg}")
+
 
 def _render_experiment_data_management_tab(data_manager):
     st.subheader("🗂️ 实验数据管理")

@@ -331,39 +331,6 @@ class DataManager:
         value = f"{salt}:{password}".encode("utf-8")
         return hashlib.sha256(value).hexdigest()
     
-    def has_permission(self, user: Union[Dict, User], action: str) -> bool:
-        if not user:
-            return False
-        
-        # 兼容字典和对象访问
-        role_str = user.get("role", UserRole.USER.value) if isinstance(user, dict) else user.role
-        
-        # 确保 role_str 是字符串值
-        if hasattr(role_str, "value"):
-            role_str = role_str.value
-
-        matrix = {
-            UserRole.ADMIN.value: {
-                "view_dashboard",
-                "manage_experiments",
-                "manage_raw_materials",
-                "view_analysis",
-                "manage_bom",
-                "manage_inventory",
-                "manage_data",
-                "manage_users",
-            },
-            UserRole.USER.value: {
-                "view_dashboard",
-                "manage_experiments",
-                "manage_raw_materials",
-                "view_analysis",
-                "manage_inventory",
-            },
-        }
-        perms = matrix.get(role_str, set())
-        return action in perms
-    
     def get_all_users(self) -> List[Dict[str, Any]]:
         data = self.load_data()
         return data.get(DataCategory.USERS.value, [])

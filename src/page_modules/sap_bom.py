@@ -4,6 +4,9 @@ import pandas as pd
 import uuid
 import io
 from utils.unit_helper import convert_quantity, normalize_unit
+from components.access_manager import check_page_permission, has_permission
+
+
 
 def render_sap_bom(bom_service, inventory_service, data_manager):
     """渲染 SAP/BOM 管理页面"""
@@ -30,7 +33,7 @@ def _render_bom_management(data_manager, bom_service):
     st.subheader("BOM 主数据管理")
     
     user = st.session_state.get("current_user")
-    if not data_manager.has_permission(user, "manage_bom"):
+    if not has_permission(user, "manage_bom"):
         st.info("仅管理员可以维护 BOM 主数据。")
         return
     
@@ -456,7 +459,7 @@ def _render_version_editor(data_manager, version, mat_options):
 
     status = version.get("status") or "approved"
     st.caption(f"当前版本状态: {status}")
-    if user and data_manager.has_permission(user, "manage_bom"):
+    if user and has_permission(user, "manage_bom"):
         col_status1, col_status2 = st.columns(2)
         with col_status1:
             if status != "approved":
@@ -855,7 +858,7 @@ def _render_production_management(data_manager, bom_service):
                     "每批次原材料合计(kg)": round(total_req, 4)
                 })
             if report_rows:
-                orders_all = data_manager.get_production_orders()
+                orders_all = data_manager.get_all_production_orders()
                 all_boms = data_manager.get_all_boms()
                 bom_type_map = {b.get("id"): b.get("bom_type") for b in all_boms}
                 all_versions = data_manager.get_all_bom_versions()

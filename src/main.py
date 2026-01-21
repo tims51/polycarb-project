@@ -149,7 +149,7 @@ def main():
         "📦 成品库存": lambda: render_product_inventory_page(container.inventory_service),
         "🧱 原材料管理": lambda: render_raw_material_management(container.inventory_service, container.data_service),
         "📝 数据记录": lambda: render_data_recording(container.data_service),
-        "💾 数据管理": lambda: render_data_management(container.data_service),
+        "💾 数据管理": lambda: render_data_management(container.data_service, container.inventory_service),
         "📈 数据分析": lambda: render_analysis_page(container.data_service),
         "📄 报告生成": lambda: render_report_page()
     }

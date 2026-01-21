@@ -36,6 +36,10 @@ VOLUME_UNITS = {
     '立方米': 1000.0
 }
 
+# 基准单位定义
+BASE_UNIT_RAW_MATERIAL = "kg"
+BASE_UNIT_PRODUCT = "吨"
+
 def normalize_unit(unit_str):
     """标准化单位字符串"""
     if not unit_str:
@@ -92,3 +96,12 @@ def convert_quantity(qty, from_unit, to_unit):
     if factor is not None:
         return val * factor, True
     return val, False
+
+def convert_to_base_unit(qty, from_unit, material_type='raw_material'):
+    """
+    将数量转换为系统的基准存储单位
+    Raw Material -> kg
+    Product -> 吨
+    """
+    target_unit = BASE_UNIT_RAW_MATERIAL if material_type == 'raw_material' else BASE_UNIT_PRODUCT
+    return convert_quantity(qty, from_unit, target_unit)
