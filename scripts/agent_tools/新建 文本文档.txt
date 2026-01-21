@@ -1,0 +1,69 @@
+import sys
+import os
+from pathlib import Path
+
+# 添加项目根目录到 Python 路径，确保能导入 app 模块
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+
+from app.core.container import ServiceContainer
+from app.utils.logger import logger
+
+class DataDoctor:
+    def __init__(self):
+        # 初始化服务容器
+        self.container = ServiceContainer()
+        self.inventory_service = self.container.inventory_service
+        self.data_service = self.container.data_service
+
+    def scan_unit_anomalies(self):
+        """扫描单位异常：检查是否有吨级数据混入 kg 级存储"""
+        print("🔍 正在扫描单位异常...")
+        issues = []
+        materials = self.data_service.get_all_raw_materials()
+        
+        for mat in materials:
+            # 逻辑：原材料存 kg。如果库存数 < 0.1 (且不是0)，极大概率是误存了吨
+            qty = float(mat.get("stock_quantity", 0))
+            if 0 < qty < 0.1: 
+                issues.append(f"   ⚠️  [单位疑似错误] 原材料: {mat['name']} (ID: {mat['id']}), 当前库存: {qty} (疑似为吨)")
+        
+        if not issues:
+            print("   ✅ 单位检查通过。")
+        return issues
+
+    def scan_orphan_records(self):
+        """扫描孤儿数据：检查台账里的 material_id 是否存在"""
+        print("🔍 正在扫描孤儿数据...")
+        valid_ids = {m['id'] for m in self.data_service.get_all_raw_materials()}
+        records = self.data_service._get_items("inventory_records")
+        
+        orphans = []
+        for r in records:
+            if r.get("material_id") not in valid_ids:
+                orphans.append(f"   ⚠️  [孤儿记录] 记录ID: {r.get('id')}, 关联物料ID: {r.get('material_id')} (已不存在)")
+        
+        if not orphans:
+            print("   ✅ 关联完整性检查通过。")
+        return orphans
+
+    def run_full_diagnosis(self):
+        print("\n=== 🏥 Polycarb 数据健康诊断报告 ===")
+        unit_issues = self.scan_unit_anomalies()
+        orphan_issues = self.scan_orphan_records()
+        print("======================================\n")
+        
+        if unit_issues or orphan_issues:
+            print(f"❌ 发现潜在问题 (共 {len(unit_issues) + len(orphan_issues)} 项):")
+            for i in unit_issues: print(i)
+            for i in orphan_issues: print(i)
+            print("\n💡 建议: 请让 Trae 编写修复脚本处理上述 ID。")
+        else:
+            print("✅ 系统健康，未发现异常。")
+
+if __name__ == "__main__":
+    try:
+        doctor = DataDoctor()
+        doctor.run_full_diagnosis()
+    except Exception as e:
+        print(f"❌ 诊断运行失败: {e}")

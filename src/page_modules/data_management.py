@@ -10,11 +10,11 @@ import json
 import uuid
 from components.access_manager import has_permission
 
-def render_data_management(data_manager, inventory_service=None):
+def render_data_management(data_manager, inventory_service=None, auth_service=None):
     """渲染数据管理页面"""
     st.header("💾 数据管理")
     
-    user = st.session_state.get("current_user")
+    user = st.session_state.get("user")
     if not user:
         st.error("请先登录。")
         return
@@ -42,7 +42,7 @@ def render_data_management(data_manager, inventory_service=None):
         with tabs[3]:
             _render_backup_tab(data_manager)
         with tabs[4]:
-            _render_system_settings_tab(data_manager)
+            _render_system_settings_tab(data_manager, auth_service)
         with tabs[5]:
             if inventory_service:
                 _render_inventory_init_tab(inventory_service)
@@ -134,22 +134,22 @@ def _render_inventory_init_tab(inventory_service):
                     # 显示列：吨
                     "system_stock_t": st.column_config.NumberColumn(
                         "💻 账面库存 (吨)",
-                        format="%.4f t",
+                        format="%.5f t",
                         disabled=True,
                         help="系统根据历史记录计算出的理论库存"
                     ),
                     "actual_stock_t": st.column_config.NumberColumn(
                         "📝 实际库存 (吨)",
-                        format="%.4f t",
+                        format="%.5f t",
                         min_value=0.0,
-                        step=0.001,
+                        step=0.00001,
                         required=True,
                         help="请输入仓库实际盘点的吨数"
                     ),
                     # 隐藏列：KG (不显示，但数据还在)
-                    "material_id": st.column_config.TextColumn(hidden=True),
-                    "system_stock": st.column_config.NumberColumn(hidden=True),
-                    "system_stock_kg": st.column_config.NumberColumn(hidden=True),
+                    "material_id": None,
+                    "system_stock": None,
+                    "system_stock_kg": None,
                 },
                 column_order=["material_id", "material_name", "system_stock_t", "actual_stock_t"],
                 hide_index=True,
@@ -184,7 +184,7 @@ def _render_inventory_init_tab(inventory_service):
                     else:
                         try:
                             # 调用后端批量调整
-                            user = st.session_state.get("current_user", {})
+                            user = st.session_state.get("user", {})
                             operator = user.get("username", "admin")
                             
                             inventory_service.adjust_inventory_batch(
@@ -1007,7 +1007,7 @@ def _render_backup_tab(data_manager):
             with st.spinner("正在创建备份..."):
                 if data_manager.create_backup():
                     st.success("✅ 备份创建成功！")
-                    user = st.session_state.get("current_user")
+                    user = st.session_state.get("user")
                     data_manager.add_audit_log(user, "BACKUP_CREATED", "立即创建数据备份")
                     time.sleep(1)
                     st.rerun()
@@ -1019,7 +1019,7 @@ def _render_backup_tab(data_manager):
         if st.button("🧹 清理旧备份", use_container_width=True, type="secondary"):
             data_manager._cleanup_old_backups()
             st.success("✅ 备份清理完成")
-            user = st.session_state.get("current_user")
+            user = st.session_state.get("user")
             data_manager.add_audit_log(user, "BACKUP_CLEANED", "清理旧备份")
             time.sleep(1)
             st.rerun()
@@ -1084,7 +1084,7 @@ def _render_backup_tab(data_manager):
                     try:
                         shutil.copy2(backup_file, data_manager.data_file)
                         st.success("✅ 备份恢复成功！系统将重新加载...")
-                        user = st.session_state.get("current_user")
+                        user = st.session_state.get("user")
                         detail = f"从备份 {backup_file.name} 恢复数据"
                         data_manager.add_audit_log(user, "BACKUP_RESTORED", detail)
                         time.sleep(2)
@@ -1100,7 +1100,7 @@ def _render_backup_tab(data_manager):
                         try:
                             backup_file.unlink()
                             st.success(f"✅ 备份 {backup_file.name} 已删除")
-                            user = st.session_state.get("current_user")
+                            user = st.session_state.get("user")
                             detail = f"删除备份文件 {backup_file.name}"
                             data_manager.add_audit_log(user, "BACKUP_DELETED", detail)
                             time.sleep(1)
@@ -1138,7 +1138,7 @@ def _render_backup_tab(data_manager):
                             file.unlink()
                         except: pass
                     st.success("✅ 所有备份文件已删除")
-                    user = st.session_state.get("current_user")
+                    user = st.session_state.get("user")
                     data_manager.add_audit_log(user, "BACKUP_DELETED_ALL", "删除所有备份文件")
                     time.sleep(2)
                     st.rerun()
@@ -1146,12 +1146,12 @@ def _render_backup_tab(data_manager):
     else:
         st.info("暂无备份文件")
 
-def _render_system_settings_tab(data_manager):
+def _render_system_settings_tab(data_manager, auth_service):
     """渲染系统设置标签页"""
     st.subheader("⚙️ 系统设置")
     
     st.markdown("### 系统信息")
-    current_user = st.session_state.get("current_user")
+    current_user = st.session_state.get("user")
     
     col1, col2, col3 = st.columns(3)
     
@@ -1200,7 +1200,7 @@ def _render_system_settings_tab(data_manager):
                     st.error("保存管理员口令失败")
     
     st.markdown("### 👤 管理员账号信息")
-    admin_users = data_manager.get_admin_users()
+    admin_users = auth_service.get_admin_users() if auth_service else []
     if admin_users:
         cols = st.columns([2, 2, 2])
         cols[0].markdown("**用户名**")
@@ -1235,14 +1235,14 @@ def _render_system_settings_tab(data_manager):
                 elif new_login_pwd != confirm_login_pwd:
                     st.error("两次输入的新登录密码不一致")
                 else:
-                    ok, msg = data_manager.change_user_password(current_user.get("id"), old_login_pwd, new_login_pwd)
+                    ok, msg = auth_service.change_user_password(current_user.get("id"), old_login_pwd, new_login_pwd) if auth_service else (False, "未注入认证服务")
                     if ok:
                         st.success(msg)
                     else:
                         st.error(msg)
     
     st.markdown("### 👥 用户与权限管理")
-    users = data_manager.get_all_users()
+    users = auth_service.get_all_users() if auth_service else []
     if users:
         total_users = len(users)
         total_admins = len([u for u in users if u.get("role") == "admin" and u.get("active", True)])
@@ -1298,7 +1298,7 @@ def _render_system_settings_tab(data_manager):
                             if is_last_admin and will_remove_admin:
                                 st.error("系统至少需要一个激活的管理员，无法移除最后一个管理员。")
                             else:
-                                ok = data_manager.update_user(user_id, fields)
+                                ok = auth_service.update_user(user_id, fields) if auth_service else False
                                 if ok:
                                     st.success("用户信息已更新")
                                     changes = []

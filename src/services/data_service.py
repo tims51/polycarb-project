@@ -14,7 +14,7 @@ from pathlib import Path
 import streamlit as st
 
 from config import DATA_FILE, BACKUP_DIR
-from services.timeline_service import TimelineService
+from .timeline_service import TimelineService
 from utils.unit_helper import convert_quantity, normalize_unit
 from core.models import (
     Project, Experiment, User, BaseModelWithConfig, TimelineInfo,
@@ -87,13 +87,16 @@ class DataService:
             DataCategory.INVENTORY_RECORDS.value,
             DataCategory.PRODUCTION_ORDERS.value,
             DataCategory.BOMS.value,
-            DataCategory.MOTHER_LIQUORS.value
+            DataCategory.MOTHER_LIQUORS.value,
+            "audit_logs"
         ]
         
         for key in required_keys:
             if key not in data:
                 if key == DataCategory.PERFORMANCE_DATA.value:
                     data[key] = {"synthesis": [], "paste": [], "mortar": [], "concrete": []}
+                elif key == "audit_logs":
+                    data[key] = []
                 else:
                     data[key] = []
         return data
@@ -656,7 +659,7 @@ class DataService:
         user = None
         try:
             if hasattr(st, "session_state"):
-                user = st.session_state.get("current_user")
+                user = st.session_state.get("user")
         except Exception:
             user = None
 
@@ -960,7 +963,8 @@ class DataService:
             candidate_names.append(PRODUCT_NAME_YJSNJ)
             
         for i, p in enumerate(inventory):
-            if p.get("name") in candidate_names:
+            p_name = p.get("product_name") or p.get("name")
+            if p_name in candidate_names:
                 target_prod_idx = i
                 break
         
@@ -997,7 +1001,7 @@ class DataService:
             "id": new_rec_id,
             "date": datetime.now().strftime("%Y-%m-%d"),
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "product_name": inventory[target_prod_idx]["name"],
+            "product_name": inventory[target_prod_idx].get("product_name") or inventory[target_prod_idx].get("name"),
             "product_type": product_type,
             "type": StockMovementType.PRODUCE_IN.value,
             "quantity": final_qty,
@@ -1053,8 +1057,13 @@ class DataService:
             return new_id
         return None
 
-    def get_material_issues(self) -> List[Dict[str, Any]]:
-        return self._get_items(DataCategory.MATERIAL_ISSUES.value)
+    def get_material_issues(self, production_order_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """获取领料单列表，支持按生产单ID筛选"""
+        all_issues = self._get_items(DataCategory.MATERIAL_ISSUES.value)
+        if production_order_id is not None:
+            # 确保 production_order_id 类型一致 (int vs str)
+            return [i for i in all_issues if str(i.get("production_order_id")) == str(production_order_id)]
+        return all_issues
 
     def update_material_issue(self, issue_id: int, updated_fields: Dict[str, Any]) -> bool:
         """更新领料单"""
@@ -1137,7 +1146,8 @@ class DataService:
                     if expected_name:
                          # 这里的模糊匹配逻辑可以简化，或者直接依赖 ID
                         for idx, p in enumerate(products):
-                            if str(p.get("name", "") or "").strip() == expected_name:
+                            p_name = str(p.get("product_name") or p.get("name") or "").strip()
+                            if p_name == expected_name:
                                 prod_idx = idx
                                 current_stock = float(p.get("stock_quantity", 0.0))
                                 break
@@ -1167,7 +1177,7 @@ class DataService:
                         "id": new_rec_id,
                         "date": datetime.now().strftime("%Y-%m-%d"),
                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "product_name": products[prod_idx]["name"],
+                        "product_name": products[prod_idx].get("product_name") or products[prod_idx].get("name"),
                         "product_type": products[prod_idx].get("type", "其他"),
                         "type": StockMovementType.CONSUME_OUT.value,
                         "quantity": final_qty,
@@ -1958,6 +1968,38 @@ class DataService:
         import hashlib
         return hashlib.sha256((password + salt).encode()).hexdigest()
 
+    def get_audit_logs(self) -> List[Dict[str, Any]]:
+        """获取审计日志"""
+        data = self.load_data()
+        return data.get("audit_logs", [])
+
+    def add_audit_log(self, user: Optional[Dict[str, Any]], action: str, detail: str) -> bool:
+        """添加审计日志"""
+        data = self.load_data()
+        logs = data.get("audit_logs", [])
+        
+        username = "System"
+        role = "system"
+        if user and isinstance(user, dict):
+            username = user.get("username", "Unknown")
+            role = user.get("role", "unknown")
+            
+        new_log = {
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "username": username,
+            "role": role,
+            "action": action,
+            "detail": detail
+        }
+        
+        logs.append(new_log)
+        # 限制日志数量，例如保留最近 1000 条
+        if len(logs) > 1000:
+            logs = logs[-1000:]
+            
+        data["audit_logs"] = logs
+        return self.save_data(data)
+
     def audit_and_fix_product_consumption_mismatch(self) -> List[Dict[str, Any]]:
         data = self.load_data()
         records = data.get(DataCategory.PRODUCT_INVENTORY_RECORDS.value, [])
@@ -2126,13 +2168,18 @@ class DataService:
             
             removed_count = 0
             new_inventory = []
+            canonical_added = False
             for it in inventory:
                 pname = it.get("product_name") or it.get("name")
                 if pname in aliases:
                     removed_count += 1
                     continue
                 if pname == canonical:
+                    if canonical_added:
+                        removed_count += 1
+                        continue
                     it["type"] = desired_type
+                    canonical_added = True
                 new_inventory.append(it)
             inventory = new_inventory
             
@@ -2156,3 +2203,32 @@ class DataService:
         data[DataCategory.PRODUCT_INVENTORY_RECORDS.value] = records
         self.save_data(data)
         return adjustments
+
+    def get_json_content(self) -> str:
+        """获取原始 JSON 字符串（用于数据维护）"""
+        try:
+            if self.data_file.exists():
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    return f.read()
+            return "{}"
+        except Exception as e:
+            logger.error(f"Error reading JSON content: {e}")
+            return "{}"
+
+    def save_json_content(self, json_str: str) -> Tuple[bool, str]:
+        """保存原始 JSON 字符串（用于数据维护）"""
+        try:
+            # 验证 JSON 格式是否合法
+            parsed = json.loads(json_str)
+            if not isinstance(parsed, dict):
+                 return False, "JSON 格式错误: 根节点必须是对象 (dict)"
+            
+            # 调用现有的 save_data 方法进行保存（它包含锁和备份逻辑）
+            if self.save_data(parsed):
+                return True, "保存成功"
+            else:
+                return False, "保存失败 (写入文件错误)"
+        except json.JSONDecodeError as e:
+            return False, f"JSON 解析失败: {e}"
+        except Exception as e:
+            return False, f"保存失败: {e}"

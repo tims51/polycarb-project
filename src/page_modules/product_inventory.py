@@ -91,7 +91,7 @@ def render_product_inventory_page(service: InventoryService):
                         final_p_name = p_name
                         
                 with col2:
-                    qty = st.number_input("入库数量 (吨)", min_value=0.01, step=0.1)
+                    qty = st.number_input("入库数量 (吨)", min_value=0.00001, step=0.00001, format="%.5f")
                     batch_no = st.text_input("生产批号 (Batch No.)", placeholder="e.g. PROD-20260120-001")
                 
                 op_date = st.date_input("入库日期", date.today())
@@ -126,7 +126,7 @@ def render_product_inventory_page(service: InventoryService):
                     st.caption(f"当前库存: {curr_stock} 吨")
                     
                 with col2:
-                    qty = st.number_input("出库数量 (吨)", min_value=0.01, max_value=curr_stock, step=0.1)
+                    qty = st.number_input("出库数量 (吨)", min_value=0.00001, max_value=curr_stock, step=0.00001, format="%.5f")
                     customer = st.text_input("客户名称")
                 
                 remark = st.text_input("备注 (订单号/物流单号)")
@@ -157,12 +157,12 @@ def render_product_inventory_page(service: InventoryService):
                 p_name = st.selectbox("校准产品", prod_names, key="cal_prod")
                 curr_p = next((p for p in products if p["product_name"] == p_name), None)
                 sys_stock = float(curr_p.get("current_stock", 0)) if curr_p else 0
-                st.metric("系统账面库存", f"{sys_stock:.4f} 吨")
+                st.metric("系统账面库存", f"{sys_stock:.5f} 吨")
                 
             with col2:
-                actual_stock = st.number_input("实物盘点库存 (吨)", min_value=0.0, step=0.0001, format="%.4f")
+                actual_stock = st.number_input("实物盘点库存 (吨)", min_value=0.0, step=0.00001, format="%.5f")
                 diff = actual_stock - sys_stock
-                st.metric("差异 (实盘-账面)", f"{diff:+.4f} 吨", delta=diff, delta_color="off")
+                st.metric("差异 (实盘-账面)", f"{diff:+.5f} 吨", delta=diff, delta_color="off")
             
             reason = st.text_input("差异原因说明 (必填)", placeholder="例如：盘亏、计量误差...")
             
@@ -221,6 +221,11 @@ def render_product_inventory_page(service: InventoryService):
                 "operator": "操作人"
             }
             
+            # 确保所有列都存在，防止 KeyError
+            for col in display_cols.keys():
+                if col not in df_records.columns:
+                    df_records[col] = None
+            
             # 格式化
             df_display = df_records[display_cols.keys()].rename(columns=display_cols)
             
@@ -229,8 +234,8 @@ def render_product_inventory_page(service: InventoryService):
                 mobile_cols=["产品名称", "变动类型", "数量", "结存"],
                 hide_index=True,
                 column_config={
-                    "数量": st.column_config.NumberColumn("数量", format="%.4f"),
-                    "结存": st.column_config.NumberColumn("结存", format="%.4f"),
+                    "数量": st.column_config.NumberColumn("数量", format="%.5f"),
+                    "结存": st.column_config.NumberColumn("结存", format="%.5f"),
                 }
             )
             

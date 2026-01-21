@@ -19,8 +19,65 @@ class InventoryService:
         self.data_service = data_service or DataService()
 
     def get_stock_balance(self, material_id: Optional[int] = None) -> Union[float, Dict[int, float]]:
-        """获取原材料库存余额"""
-        return self.data_service.get_stock_balance(material_id)
+        """获取原材料库存余额（支持单位换算）"""
+        data = self.data_service.load_data()
+        records = data.get(DataCategory.INVENTORY_RECORDS.value, [])
+        materials = data.get(DataCategory.RAW_MATERIALS.value, [])
+        
+        # 建立物料基础单位映射
+        mat_base_units = {m["id"]: m.get("unit", "kg") for m in materials}
+        
+        def _get_converted_qty(r, mid):
+            qty = float(r.get("quantity", 0.0))
+            record_unit = r.get("unit")
+            base_unit = normalize_unit(mat_base_units.get(mid, "kg"))
+            
+            if record_unit:
+                record_unit = normalize_unit(record_unit)
+                if record_unit != base_unit:
+                    if record_unit in ["ton", "吨", "t", "tons"] and base_unit in ["kg", "千克", "kgs"]:
+                        qty *= 1000.0
+                    elif record_unit in ["kg", "千克", "kgs"] and base_unit in ["ton", "吨", "t", "tons"]:
+                        qty /= 1000.0
+                    else:
+                        factor = get_conversion_factor(record_unit, base_unit)
+                        if factor:
+                            qty *= factor
+            return qty
+
+        # 如果指定了 material_id，只计算该物料
+        if material_id:
+            balance = 0.0
+            for r in records:
+                if r.get("material_id") == material_id:
+                    qty = _get_converted_qty(r, material_id)
+                    rtype = r.get("type", "")
+                    if rtype in [StockMovementType.IN.value, StockMovementType.PRODUCE_IN.value, 
+                                StockMovementType.ADJUST_IN.value, StockMovementType.RETURN_IN.value]:
+                        balance += qty
+                    elif rtype in [StockMovementType.OUT.value, StockMovementType.CONSUME_OUT.value, 
+                                  StockMovementType.ADJUST_OUT.value, StockMovementType.RETURN_OUT.value,
+                                  StockMovementType.SHIP_OUT.value]:
+                        balance -= qty
+            return balance
+        
+        # 否则返回所有物料的余额字典
+        balances = {m["id"]: 0.0 for m in materials}
+        for r in records:
+            mid = r.get("material_id")
+            if mid not in balances: 
+                continue
+            
+            qty = _get_converted_qty(r, mid)
+            rtype = r.get("type", "")
+            if rtype in [StockMovementType.IN.value, StockMovementType.PRODUCE_IN.value, 
+                        StockMovementType.ADJUST_IN.value, StockMovementType.RETURN_IN.value]:
+                balances[mid] += qty
+            elif rtype in [StockMovementType.OUT.value, StockMovementType.CONSUME_OUT.value, 
+                          StockMovementType.ADJUST_OUT.value, StockMovementType.RETURN_OUT.value,
+                          StockMovementType.SHIP_OUT.value]:
+                balances[mid] -= qty
+        return balances
 
     def check_stock_availability(self, material_name: str, quantity_needed: float, current_stock: float = None) -> bool:
         """
@@ -186,6 +243,8 @@ class InventoryService:
         
         # Initialize snapshot with 0
         snapshot = {m["id"]: 0.0 for m in materials}
+        # Material base units map
+        mat_base_units = {m["id"]: m.get("unit", "kg") for m in materials}
         
         # Calculate stock based on records up to target_date
         for r in records:
@@ -205,6 +264,22 @@ class InventoryService:
                 
             qty = float(r.get("quantity", 0.0))
             rtype = r.get("type")
+            
+            # --- 标准化换算逻辑 ---
+            record_unit = r.get("unit")
+            base_unit = normalize_unit(mat_base_units.get(mid, "kg"))
+            
+            if record_unit:
+                record_unit = normalize_unit(record_unit)
+                if record_unit != base_unit:
+                    if record_unit in ["ton", "吨", "t", "tons"] and base_unit in ["kg", "千克", "kgs"]:
+                        qty *= 1000.0
+                    elif record_unit in ["kg", "千克", "kgs"] and base_unit in ["ton", "吨", "t", "tons"]:
+                        qty /= 1000.0
+                    else:
+                        factor = get_conversion_factor(record_unit, base_unit)
+                        if factor:
+                            qty *= factor
             
             # Logic: Add or Subtract
             if rtype in [StockMovementType.IN.value, StockMovementType.RETURN_IN.value, 
@@ -455,7 +530,7 @@ class InventoryService:
                         "id": new_rec_id,
                         "date": datetime.now().strftime("%Y-%m-%d"),
                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "product_name": products[prod_idx]["name"],
+                        "product_name": products[prod_idx].get("product_name") or products[prod_idx].get("name"),
                         "product_type": products[prod_idx].get("type", "其他"),
                         "type": StockMovementType.CONSUME_OUT.value,
                         "quantity": final_qty, # Stored in Tons

@@ -18,16 +18,17 @@ def render_sidebar(data_service: DataService, page_routes: Dict[str, Callable]):
     with st.sidebar:
         st.title("导航菜单")
         
-        user = st.session_state.get("current_user")
+        user = st.session_state.get("user")
         
         # 1. Define Menu Structure
         # Map page names (keys in page_routes) to Groups
         # Note: We rely on exact string matching with main.py keys
+        # 注意：这里的名称必须与 src/main.py 中的 PAGE_ROUTES 键名完全一致
         menu_structure = {
-            "📊 仪表盘": ["📊 仪表盘"],
-            "🧪 实验管理": ["🧪 实验记录", "📋 实验管理"],
+            "📊 仪表盘": ["📊 项目概览"],
+            "🧪 实验管理": ["📝 数据记录", "🧪 实验管理"],
             "📈 数据洞察": ["📈 数据分析"],
-            "🏭 供应链与生产": ["📦 原材料管理", "🏭 产品库存", "🏭 SAP/BOM 管理"],
+            "🏭 供应链与生产": ["🧱 原材料管理", "📦 成品库存", "🏭 SAP/BOM"],
             "⚙️ 系统设置": ["💾 数据管理"]
         }
         
@@ -39,7 +40,7 @@ def render_sidebar(data_service: DataService, page_routes: Dict[str, Callable]):
             
         # 2. Render Navigation
         if "selected_page" not in st.session_state:
-            st.session_state.selected_page = "📊 仪表盘" # Default
+            st.session_state.selected_page = "📊 项目概览" # Default
             
         # Filter available pages based on permission
         available_pages = [p for p in page_routes.keys() if check_page_permission(user, p)]
@@ -108,4 +109,4 @@ def render_sidebar(data_service: DataService, page_routes: Dict[str, Callable]):
         render_mobile_access_sidebar()
         render_internet_access_sidebar()
         
-        return page_routes.get(st.session_state.selected_page)
+        return st.session_state.selected_page

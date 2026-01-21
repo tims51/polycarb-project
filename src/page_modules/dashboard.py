@@ -7,7 +7,7 @@ from components.ui_manager import UIManager
 
 def render_dashboard(data_manager):
     """渲染项目概览页面"""
-    user = st.session_state.get("current_user")
+    user = st.session_state.get("user")
     if not user:
         UIManager.toast("请登录后查看项目概览。", type="info")
         st.info("请登录后查看项目概览。")

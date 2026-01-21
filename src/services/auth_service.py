@@ -100,3 +100,53 @@ class AuthService:
             from schemas.user import UserCreate
             admin_data = UserCreate(username="admin", password="admin123", role="admin")
             self.create_user(admin_data)
+
+    def get_all_users(self) -> list[dict]:
+        data = self.data_service.load_data()
+        return data.get(DataCategory.USERS.value, [])
+
+    def get_admin_users(self) -> list[dict]:
+        users = self.get_all_users()
+        return [u for u in users if str(u.get("role", UserRole.USER.value)) == UserRole.ADMIN.value and u.get("active", True)]
+
+    def change_user_password(self, user_id: int, old_password: str, new_password: str) -> tuple[bool, str]:
+        data = self.data_service.load_data()
+        users = data.get(DataCategory.USERS.value, [])
+        idx = -1
+        for i, u in enumerate(users):
+            if u.get("id") == user_id:
+                idx = i
+                break
+        if idx == -1:
+            return False, "用户不存在"
+        user = users[idx]
+        salt = user.get("salt", "")
+        expected = user.get("password_hash", "")
+        if not salt or not expected:
+            return False, "当前密码校验失败"
+        calc = self._hash_password(old_password, salt)
+        if not secrets.compare_digest(calc, expected):
+            return False, "当前密码错误"
+        new_salt = secrets.token_hex(16)
+        new_hash = self._hash_password(new_password, new_salt)
+        user["salt"] = new_salt
+        user["password_hash"] = new_hash
+        users[idx] = user
+        data[DataCategory.USERS.value] = users
+        if self.data_service.save_data(data):
+            return True, "登录密码已更新"
+        return False, "保存失败"
+
+    def update_user(self, user_id: int, fields: dict) -> bool:
+        data = self.data_service.load_data()
+        users = data.get(DataCategory.USERS.value, [])
+        updated = False
+        for i, u in enumerate(users):
+            if u.get("id") == user_id:
+                users[i].update(fields)
+                updated = True
+                break
+        if updated:
+            data[DataCategory.USERS.value] = users
+            return self.data_service.save_data(data)
+        return False

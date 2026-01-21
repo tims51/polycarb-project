@@ -2,9 +2,9 @@
 
 from datetime import datetime, timedelta, date
 from typing import Union, Dict, Any, Optional
-from core.models import Project, TimelineInfo
-from core.enums import ProjectStatus, StatusEmoji
-from core.constants import DATE_FORMAT
+from .models import Project, TimelineInfo
+from .enums import ProjectStatus, StatusEmoji
+from .constants import DATE_FORMAT
 
 class TimelineManager:
     """专门处理项目时间线计算和管理的类"""

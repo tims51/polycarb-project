@@ -16,20 +16,20 @@ from openpyxl import Workbook
 from openpyxl.chart import LineChart, BarChart, Reference
 from openpyxl.styles import Font, Alignment
 
-from core.timeline_manager import TimelineManager
-from core.models import (
+from .timeline_manager import TimelineManager
+from .models import (
     Project, Experiment, User, BaseModelWithConfig, TimelineInfo,
     RawMaterial, SynthesisRecord, Product, InventoryRecord, MotherLiquor,
     BOM, BOMVersion, ProductionOrder, PasteExperiment, MortarExperiment, ConcreteExperiment,
     ProductInventoryRecord, GoodsReceipt, ShippingOrder, GoodsReceiptItem, ShippingOrderItem, BOMExplosionItem
 )
-from core.enums import (
+from .enums import (
     ProjectStatus, ExperimentStatus, ExperimentType, UserRole, MotherLiquorSourceType, 
     StockMovementType, BOMStatus, ProductionOrderStatus, IssueStatus, ProductCategory, UnitType, PriorityType, MaterialType, DataCategory,
     ReceiptStatus, ShippingStatus, PermissionAction
 )
 from config import DATA_FILE, BACKUP_DIR, DEFAULT_UNIT
-from core.constants import DATE_FORMAT, DATETIME_FORMAT, BACKUP_INTERVAL_SECONDS, DEFAULT_OPERATOR_NAME, DEFAULT_UNIT_KG, WATER_MATERIAL_ALIASES, PRODUCT_NAME_WJSNJ, PRODUCT_NAME_YJSNJ, DEFAULT_BOM_PLAN_QTY
+from .constants import DATE_FORMAT, DATETIME_FORMAT, BACKUP_INTERVAL_SECONDS, DEFAULT_OPERATOR_NAME, DEFAULT_UNIT_KG, WATER_MATERIAL_ALIASES, PRODUCT_NAME_WJSNJ, PRODUCT_NAME_YJSNJ, DEFAULT_BOM_PLAN_QTY
 from utils.logger import logger
 from utils.unit_helper import convert_quantity, normalize_unit
 from utils.file_lock import file_lock

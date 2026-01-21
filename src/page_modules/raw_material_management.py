@@ -191,9 +191,9 @@ def _render_stocktake_section(data_manager):
             "id": None,
             "名称": st.column_config.TextColumn(disabled=True),
             "物料号": st.column_config.TextColumn(disabled=True),
-            "当前库存": st.column_config.NumberColumn(disabled=True, format="%.4f"),
+            "当前库存": st.column_config.NumberColumn(disabled=True, format="%.5f"),
             "单位": st.column_config.TextColumn(disabled=True),
-            "盘点实存": st.column_config.NumberColumn("盘点实存 (请输入实际值)", required=True, step=0.0001, format="%.4f"),
+            "盘点实存": st.column_config.NumberColumn("盘点实存 (请输入实际值)", required=True, step=0.00001, format="%.5f"),
             "备注": st.column_config.TextColumn()
         }
         
@@ -357,7 +357,7 @@ def _render_history_restore_section(data_manager):
                             "type": rtype,
                             "quantity": qty,
                             "reason": f"历史回溯: 恢复至 {target_date_str} (Diff: {diff:+.4f})",
-                            "operator": st.session_state.get("current_user", {}).get("username", "User"), 
+                            "operator": st.session_state.get("user", {}).get("username", "User"), 
                             "date": datetime.now().strftime("%Y-%m-%d")
                         }
                         
@@ -430,7 +430,7 @@ def render_raw_material_management(inventory_service, data_manager):
                         st.text_input("初始库存", value="N/A (不追踪库存)", disabled=True, key=f"raw_init_stock_disp_{form_id}")
                         initial_stock = 0.0
                     else:
-                        initial_stock = st.number_input("初始库存", min_value=0.0, step=0.00001, format="%g", key=f"raw_init_stock_{form_id}")
+                        initial_stock = st.number_input("初始库存", min_value=0.0, step=0.00001, format="%.5f", key=f"raw_init_stock_{form_id}")
                 
                 with col_inv2:
                     stock_unit = st.text_input("单位 (e.g., kg, ton)", value="ton", key=f"raw_unit_{form_id}")
@@ -532,7 +532,7 @@ def render_raw_material_management(inventory_service, data_manager):
                         op_unit = st.selectbox("单位", common_units, index=0) # 默认 kg
                     
                 with op_col3:
-                    op_qty = st.number_input("数量*", min_value=0.0, step=0.00001, format="%g")
+                    op_qty = st.number_input("数量*", min_value=0.0, step=0.00001, format="%.5f")
                 
                 op_reason = st.text_input("备注/原因 (e.g. 采购入库, 生产领用)")
                 
@@ -908,7 +908,7 @@ def render_raw_material_management(inventory_service, data_manager):
                     "物料号": st.column_config.TextColumn("物料号", width="small"),
                     "当前库存 (吨)": st.column_config.NumberColumn(
                         "当前库存 (吨)", 
-                        format="%.4f", 
+                        format="%.5f", 
                         help="系统自动转换显示为吨，实际存储为kg"
                     ),
                     "原始单位": st.column_config.TextColumn("原始单位", width="small"),
@@ -1083,7 +1083,7 @@ def render_raw_material_management(inventory_service, data_manager):
                                 "当前库存 (吨)",
                                 min_value=0.0,
                                 step=0.00001,
-                                format="%g",
+                                format="%.5f",
                                 value=display_stock,
                                 key=f"raw_e_stock_{form_uid}"
                             )

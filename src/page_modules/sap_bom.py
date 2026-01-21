@@ -32,7 +32,7 @@ def render_sap_bom(bom_service, inventory_service, data_manager):
 def _render_bom_management(data_manager, bom_service):
     st.subheader("BOM 主数据管理")
     
-    user = st.session_state.get("current_user")
+    user = st.session_state.get("user")
     if not has_permission(user, "manage_bom"):
         st.info("仅管理员可以维护 BOM 主数据。")
         return
@@ -212,7 +212,7 @@ def _render_bom_form(data_manager, bom=None):
              st.rerun()
 
 def _render_bom_detail(data_manager, bom):
-    user = st.session_state.get("current_user")
+    user = st.session_state.get("user")
     col_title, col_ops = st.columns([3, 1])
     with col_title:
         st.markdown(f"### {bom.get('bom_code')} - {bom.get('bom_name')}")
@@ -451,7 +451,7 @@ def _render_export_download(df, base_filename, key_prefix, csv_encoding="utf-8-s
 
 def _render_version_editor(data_manager, version, mat_options):
     current_lines = version.get("lines", [])
-    user = st.session_state.get("current_user")
+    user = st.session_state.get("user")
     locked = bool(version.get("locked", False))
     auth_key = f"ver_edit_auth_{version['id']}"
     if auth_key not in st.session_state:
@@ -671,7 +671,7 @@ def _render_version_editor(data_manager, version, mat_options):
 def _render_production_management(data_manager, bom_service):
     st.subheader("生产订单管理")
     
-    user = st.session_state.get("current_user")
+    user = st.session_state.get("user")
     if not user:
         st.info("请登录后查看生产订单。")
         return
@@ -930,7 +930,7 @@ def _render_production_management(data_manager, bom_service):
                 col_exec1, col_exec2 = st.columns(2)
                 with col_exec1:
                     if st.button("创建10吨生产单"):
-                        user = st.session_state.get("current_user")
+                        user = st.session_state.get("user")
                         for t, sel in by_type.items():
                             new_order = {
                                 "order_code": f"PROD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}",
@@ -1014,7 +1014,7 @@ def _render_production_management(data_manager, bom_service):
                         "oem_manufacturer": oem_name if prod_mode == "代工" else ""
                     }
                     new_id = data_manager.add_production_order(new_order)
-                    user = st.session_state.get("current_user")
+                    user = st.session_state.get("user")
                     if user and new_id:
                         detail = f"创建生产单 #{new_id}，BOM {sel_bom_label}，版本 {selected_ver.get('version')}，计划产量 {plan_qty} kg，模式 {prod_mode}"
                         data_manager.add_audit_log(user, "PROD_ORDER_CREATED", detail)
@@ -1051,7 +1051,7 @@ def _render_production_management(data_manager, bom_service):
                     success, msg = data_manager.delete_production_order(order['id'])
                     if success:
                         st.success(msg)
-                        user = st.session_state.get("current_user")
+                        user = st.session_state.get("user")
                         if user:
                             detail = f"删除生产单 #{order.get('id')}，单号 {order.get('order_code')}"
                             data_manager.add_audit_log(user, "PROD_ORDER_DELETED", detail)
@@ -1084,7 +1084,7 @@ def _render_production_management(data_manager, bom_service):
                          old_qty = float(order.get('plan_qty'))
                          data_manager.update_production_order(order['id'], {"plan_qty": new_qty})
                          st.success("已更新")
-                         user = st.session_state.get("current_user")
+                         user = st.session_state.get("user")
                          if user:
                              detail = f"修改生产单 #{order.get('id')} 计划产量: {old_qty} -> {new_qty} kg"
                              data_manager.add_audit_log(user, "PROD_ORDER_PLAN_QTY_UPDATED", detail)
@@ -1094,7 +1094,7 @@ def _render_production_management(data_manager, bom_service):
             if order.get('status') == 'draft':
                 if st.button("🚀 下达生产 (Released)"):
                     data_manager.update_production_order(order['id'], {"status": "released"})
-                    user = st.session_state.get("current_user")
+                    user = st.session_state.get("user")
                     if user:
                         detail = f"将生产单 #{order.get('id')} 状态从 draft 变更为 released"
                         data_manager.add_audit_log(user, "PROD_ORDER_STATUS_UPDATED", detail)
@@ -1107,7 +1107,7 @@ def _render_production_management(data_manager, bom_service):
                     if issue_id:
                         st.success("领料单已生成")
                         data_manager.update_production_order(order['id'], {"status": "issued"})
-                        user = st.session_state.get("current_user")
+                        user = st.session_state.get("user")
                         if user:
                             detail = f"为生产单 #{order.get('id')} 生成领料单 #{issue_id}，生产单状态更新为 issued"
                             data_manager.add_audit_log(user, "ISSUE_CREATED_FROM_ORDER", detail)
@@ -1136,7 +1136,7 @@ def _render_production_management(data_manager, bom_service):
                         
                         if issue.get('status') == 'draft':
                             if st.button("✅ 确认领料过账 (Post)", key=f"post_{issue['id']}"):
-                                user = st.session_state.get("current_user")
+                                user = st.session_state.get("user")
                                 operator_name = user.get("username") if user else "User"
                                 success, msg = data_manager.post_issue(issue['id'], operator=operator_name)
                                 if success:
@@ -1327,7 +1327,7 @@ def _render_shipping_management(data_manager):
                     if ship_qty > current_stock:
                         st.error(f"库存不足！当前库存: {current_stock:.2f} 吨")
                     else:
-                        user = st.session_state.get("current_user")
+                        user = st.session_state.get("user")
                         operator_name = user.get("username") if user else "User"
                         record_data = {
                             "product_name": selected_prod.get('product_name', 'Unknown'),

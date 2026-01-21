@@ -100,7 +100,7 @@ def render_login_page(auth_service):
                 ok, user_resp = auth_service.authenticate_user(UserLogin(username=username, password=password))
                 if ok:
                     # 转换为字典以兼容现有逻辑
-                    st.session_state.current_user = user_resp.model_dump()
+                    st.session_state['user'] = user_resp.model_dump()
                     st.success(f"欢迎，{user_resp.username}")
                     time.sleep(0.3)
                     st.rerun()
@@ -142,39 +142,45 @@ def main():
     st.session_state.services['auth_service'] = container.auth_service
 
     # 路由配置 - 注入特定服务
+    # 注意：这里的键名必须与 src/components/sidebar.py 中的 menu_structure 完全一致
     PAGE_ROUTES = {
         "📊 项目概览": lambda: render_dashboard(container.data_service),
         "🧪 实验管理": lambda: render_experiment_management(container.data_service),
-        "🏭 SAP/BOM": lambda: render_sap_bom(container.bom_service, container.inventory_service, container.data_service),
-        "📦 成品库存": lambda: render_product_inventory_page(container.inventory_service),
-        "🧱 原材料管理": lambda: render_raw_material_management(container.inventory_service, container.data_service),
         "📝 数据记录": lambda: render_data_recording(container.data_service),
-        "💾 数据管理": lambda: render_data_management(container.data_service, container.inventory_service),
         "📈 数据分析": lambda: render_analysis_page(container.data_service),
+        "🧱 原材料管理": lambda: render_raw_material_management(container.inventory_service, container.data_service),
+        "📦 成品库存": lambda: render_product_inventory_page(container.inventory_service),
+        "🏭 SAP/BOM": lambda: render_sap_bom(container.bom_service, container.inventory_service, container.data_service),
+        "💾 数据管理": lambda: render_data_management(container.data_service, container.inventory_service, container.auth_service),
         "📄 报告生成": lambda: render_report_page()
     }
 
-    if "current_user" not in st.session_state:
-        st.session_state.current_user = None
+    if "user" not in st.session_state:
+        st.session_state['user'] = None
 
     with st.sidebar:
-        if st.session_state.current_user:
-            st.markdown(f"当前用户：**{st.session_state.current_user['username']}** ({st.session_state.current_user.get('role', 'user')})")
+        if st.session_state.get('user'):
+            st.markdown(f"当前用户：**{st.session_state['user']['username']}** ({st.session_state['user'].get('role', 'user')})")
             if st.button("退出登录", use_container_width=True):
-                st.session_state.current_user = None
+                st.session_state['user'] = None
                 st.rerun()
 
-    if not st.session_state.current_user:
+    if not st.session_state.get('user'):
         render_login_page(container.auth_service)
         return
 
     # DataService 已经实现了所需接口，直接传递
-    selected_page_func = render_sidebar(container.data_service, PAGE_ROUTES)
+    selected_page_name = render_sidebar(container.data_service, PAGE_ROUTES)
+    
+    # 获取对应页面的渲染函数
+    selected_page_func = PAGE_ROUTES.get(selected_page_name)
     
     # 渲染选中的页面
     if selected_page_func:
         with st.container():
             selected_page_func()
+    else:
+        st.error(f"未找到页面: {selected_page_name}")
     
     # 页脚
     st.markdown("---")

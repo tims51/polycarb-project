@@ -183,7 +183,7 @@ def _render_mother_liquor_tab(data_manager):
         with st.form("add_mother_liquor_form", clear_on_submit=True):
             if source_type == "合成实验":
                 # 获取所有合成实验
-                synthesis_experiments = data_manager.get_all_synthesis_experiments()
+                synthesis_experiments = data_manager.get_all_synthesis_records()
                 if synthesis_experiments:
                     # 创建选项列表: ID - 配方编号 (日期)
                     exp_options = {f"{exp['id']}: {exp.get('formula_id', '未命名')} ({exp.get('synthesis_date', '')})": exp for exp in synthesis_experiments}
@@ -2465,7 +2465,7 @@ def _render_products_list_tab(data_manager, products, raw_materials):
                         
                         total_yield = sum(float(l['qty']) for l in lines)
                         
-                        user = st.session_state.get("current_user", None)
+                        user = st.session_state.get("user", None)
                         ver_data = {
                             "bom_id": new_bom_id,
                             "version": "V1", 

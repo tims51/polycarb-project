@@ -1,4 +1,3 @@
-
 import sys
 import os
 import logging
@@ -8,7 +7,7 @@ from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 from services.data_service import DataService
-from core.enums import DataCategory, StockMovementType, UnitType
+from core.enums import DataCategory, StockMovementType
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -27,7 +26,7 @@ def fix_data_issues(dry_run: bool = True):
     # ---------------------------------------------------------
     # 1. Fix Raw Material Units (Ton -> kg)
     # ---------------------------------------------------------
-    logger.info("\n[1/2] Fixing Raw Material Units...")
+    logger.info("\n[1/3] Fixing Raw Material Units...")
     fixed_materials = 0
     fixed_records = 0
     
@@ -71,14 +70,13 @@ def fix_data_issues(dry_run: bool = True):
     # ---------------------------------------------------------
     # 2. Fix Product Stock Mismatch (Backfill Records)
     # ---------------------------------------------------------
-    logger.info("\n[2/2] Fixing Product Stock Mismatches...")
+    logger.info("\n[2/3] Fixing Product Stock Mismatches...")
     fixed_products = 0
     
     # Calculate current ledger balance for products
-    ledger_balance = {}
+    prod_ledger_balance = {}
     for r in product_records:
         pid = None
-        # Try to find product by name/type since ID might not be in record or reliable
         pname = r.get("product_name")
         ptype = r.get("product_type")
         
@@ -88,37 +86,34 @@ def fix_data_issues(dry_run: bool = True):
             if p.get("product_name") == pname and p.get("type") == ptype:
                 found_p = p
                 break
-            # Fallback: check legacy name
             if not found_p and p.get("name") == pname and p.get("type") == ptype:
                 found_p = p
                 break
         
         if found_p:
             pid = found_p.get("id")
-            if pid not in ledger_balance: ledger_balance[pid] = 0.0
+            if pid not in prod_ledger_balance: prod_ledger_balance[pid] = 0.0
             
             qty = float(r.get("quantity", 0.0))
             rtype = r.get("type")
             if rtype in [StockMovementType.IN.value, StockMovementType.PRODUCE_IN.value, StockMovementType.ADJUST_IN.value, StockMovementType.RETURN_IN.value]:
-                ledger_balance[pid] += qty
+                prod_ledger_balance[pid] += qty
             elif rtype in [StockMovementType.OUT.value, StockMovementType.CONSUME_OUT.value, StockMovementType.ADJUST_OUT.value, StockMovementType.SHIP_OUT.value]:
-                ledger_balance[pid] -= qty
+                prod_ledger_balance[pid] -= qty
 
     # Check against system stock
     for p in products:
         pid = p.get("id")
         sys_stock = float(p.get("stock_quantity") or p.get("current_stock") or 0.0)
-        calc_stock = ledger_balance.get(pid, 0.0)
+        calc_stock = prod_ledger_balance.get(pid, 0.0)
         
         diff = sys_stock - calc_stock
         if abs(diff) > 1e-6:
             if dry_run:
                 logger.info(f"  [PROPOSED] Product '{p.get('product_name')}' (ID {pid}): System={sys_stock}, Ledger={calc_stock}, Diff={diff}. Will create adjustment.")
             else:
-                # Create adjustment record
                 new_id = ds._get_next_id(product_records)
-                # Increment next_id for local loop safety if multiple fixes
-                # (ds._get_next_id reads from list, so we must append first)
+                # Increment locally for safety
                 
                 rec = {
                     "id": new_id,
@@ -137,6 +132,64 @@ def fix_data_issues(dry_run: bool = True):
                 fixed_products += 1
 
     logger.info(f"  -> Products to fix: {fixed_products}")
+
+    # ---------------------------------------------------------
+    # 3. Fix Raw Material Stock Mismatch (Backfill Records)
+    # ---------------------------------------------------------
+    logger.info("\n[3/3] Fixing Raw Material Stock Mismatches...")
+    fixed_raw_materials_mismatch = 0
+    
+    # Calculate current ledger balance for raw materials
+    # We must use the updated 'inventory_records' from Step 1
+    raw_ledger_balance = {}
+    
+    for r in inventory_records:
+        mid = r.get("material_id")
+        if not mid: continue
+        
+        if mid not in raw_ledger_balance: raw_ledger_balance[mid] = 0.0
+        
+        qty = float(r.get("quantity", 0.0))
+        rtype = r.get("type")
+        
+        # Logic matching InventoryService / Diagnose
+        if rtype in [StockMovementType.IN.value, StockMovementType.PRODUCE_IN.value, 
+                    StockMovementType.ADJUST_IN.value, StockMovementType.RETURN_IN.value, "in", "adjust_in"]:
+            raw_ledger_balance[mid] += qty
+        elif rtype in [StockMovementType.OUT.value, StockMovementType.CONSUME_OUT.value, 
+                      StockMovementType.ADJUST_OUT.value, "out", "consume_out", "adjust_out"]:
+            raw_ledger_balance[mid] -= qty
+
+    # Check against system stock (which might have been updated in Step 1)
+    for mat in raw_materials:
+        mid = mat.get("id")
+        sys_stock = float(mat.get("stock_quantity", 0.0))
+        calc_stock = raw_ledger_balance.get(mid, 0.0)
+        
+        diff = sys_stock - calc_stock
+        
+        if abs(diff) > 1e-6:
+            if dry_run:
+                logger.info(f"  [PROPOSED] Material '{mat.get('name')}' (ID {mid}): System={sys_stock}, Ledger={calc_stock}, Diff={diff}. Will create adjustment.")
+            else:
+                new_id = ds._get_next_id(inventory_records)
+                
+                rec = {
+                    "id": new_id,
+                    "date": datetime.now().strftime("%Y-%m-%d"),
+                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "material_id": mid,
+                    "type": StockMovementType.ADJUST_IN.value if diff > 0 else StockMovementType.ADJUST_OUT.value,
+                    "quantity": abs(diff),
+                    "reason": "系统自动校准: 修复历史台账缺失",
+                    "operator": "System",
+                    "snapshot_stock": sys_stock,
+                    "related_doc_type": "SYSTEM_FIX"
+                }
+                inventory_records.append(rec)
+                fixed_raw_materials_mismatch += 1
+
+    logger.info(f"  -> Raw Materials Mismatches to fix: {fixed_raw_materials_mismatch}")
     
     # ---------------------------------------------------------
     # Save
