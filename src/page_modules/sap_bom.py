@@ -3,8 +3,71 @@ from datetime import datetime
 import pandas as pd
 import uuid
 import io
+import graphviz
 from utils.unit_helper import convert_quantity, normalize_unit
 from components.access_manager import check_page_permission, has_permission
+
+def _render_step_progress(current_status):
+    """渲染生产订单步骤进度条"""
+    steps = ["draft", "released", "issued", "finished"]
+    step_labels = ["📝 草稿", "🚀 下达", "📦 领料", "🏁 完工"]
+    
+    # 获取当前索引
+    try:
+        current_idx = steps.index(current_status)
+    except ValueError:
+        current_idx = -1
+
+    # 使用进度条和文字模拟
+    cols = st.columns(len(steps))
+    for i, label in enumerate(step_labels):
+        with cols[i]:
+            if i < current_idx:
+                st.success(label)
+            elif i == current_idx:
+                st.info(f"**{label}**")
+            else:
+                st.write(f"<span style='color:gray'>{label}</span>", unsafe_allow_html=True)
+    
+    # 简单的进度条
+    progress = (current_idx + 1) / len(steps)
+    st.progress(progress)
+
+def _render_bom_tree_graphviz(bom_tree):
+    """使用 Graphviz 渲染 BOM 树"""
+    dot = graphviz.Digraph(comment='BOM Tree')
+    dot.attr(rankdir='LR', size='8,5')
+    dot.attr('node', shape='box', style='rounded,filled', fontname='Microsoft YaHei', fontsize='10')
+
+    def add_nodes(node, parent_id=None):
+        if not node: return
+        
+        node_id = str(uuid.uuid4())
+        
+        # 节点内容
+        if "code" in node: # 根节点或子 BOM 节点
+            label = f"{node.get('name')}\n({node.get('code', 'N/A')})"
+            fillcolor = '#e1f5fe' # 浅蓝色
+        else: # 物料行
+            label = f"{node.get('item_name')}\n{node.get('qty')} {node.get('uom')}"
+            fillcolor = '#f5f5f5' # 浅灰色
+            if node.get('substitutes'):
+                label += f"\n(🔄 {node.get('substitutes')})"
+        
+        dot.node(node_id, label, fillcolor=fillcolor)
+        
+        if parent_id:
+            dot.edge(parent_id, node_id)
+            
+        # 递归处理
+        if "children" in node:
+            for child in node["children"]:
+                add_nodes(child, node_id)
+        if "sub_bom" in node:
+            add_nodes(node["sub_bom"], node_id)
+
+    add_nodes(bom_tree)
+    st.graphviz_chart(dot)
 
 
 
@@ -39,44 +102,37 @@ def _render_bom_management(data_manager, bom_service):
     
     boms = data_manager.get_all_boms()
     all_versions = data_manager.get_all_bom_versions()
+    
+    # 待审核提醒 (Card 风格)
     pending_versions = [v for v in all_versions if v.get("status") == "pending"]
     if pending_versions:
-        with st.expander("待审核 BOM 版本", expanded=True):
+        with st.container(border=True):
+            st.markdown("⚠️ **待审核 BOM 版本**")
             bom_map = {b.get("id"): b for b in boms}
             for v in pending_versions:
                 bom = bom_map.get(v.get("bom_id"))
-                bom_label = ""
-                if bom:
-                    code = str(bom.get("bom_code", "")).strip()
-                    name = str(bom.get("bom_name", "")).strip()
-                    bom_label = f"{code}-{name}" if code else name
-                ver_label = v.get("version", "")
-                eff = v.get("effective_from", "-")
-                creator = v.get("created_by", "-")
-                info = f"{bom_label} | 版本 {ver_label} | 生效 {eff} | 提交人 {creator}"
+                bom_label = f"{bom.get('bom_code')}-{bom.get('bom_name')}" if bom else "Unknown"
                 col_p1, col_p2, col_p3 = st.columns([4, 1, 1])
                 with col_p1:
-                    st.write(info)
+                    st.caption(f"{bom_label} | 版本 {v.get('version')} | 生效 {v.get('effective_from')} | 提交人 {v.get('created_by')}")
                 with col_p2:
-                    if st.button("批准", key=f"pending_approve_{v.get('id')}"):
+                    if st.button("批准", key=f"pending_approve_{v.get('id')}", type="primary", use_container_width=True):
                         data_manager.update_bom_version(v.get("id"), {
                             "status": "approved",
                             "approved_by": user.get("username") if user else None,
                             "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "locked": True
                         })
-                        st.success("已批准")
                         st.rerun()
                 with col_p3:
-                    if st.button("驳回", key=f"pending_reject_{v.get('id')}"):
+                    if st.button("驳回", key=f"pending_reject_{v.get('id')}", use_container_width=True):
                         data_manager.update_bom_version(v.get("id"), {
                             "status": "rejected",
                             "rejected_by": user.get("username") if user else None,
                             "rejected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         })
-                        st.warning("已驳回")
                         st.rerun()
-    
+
     if "bom_active_id" not in st.session_state:
         st.session_state.bom_active_id = None
     if "bom_edit_mode" not in st.session_state:
@@ -86,10 +142,7 @@ def _render_bom_management(data_manager, bom_service):
     
     with col_list:
         st.markdown("#### BOM 列表")
-        # 搜索框
-        search_term = st.text_input("🔍 搜索 BOM", placeholder="编号/名称").strip().lower()
-        
-        if st.button("➕ 新建 BOM", use_container_width=True):
+        if st.button("➕ 新建 BOM", use_container_width=True, type="primary"):
             st.session_state.bom_active_id = "new"
             st.session_state.bom_edit_mode = True
             st.rerun()
@@ -97,44 +150,55 @@ def _render_bom_management(data_manager, bom_service):
         if not boms:
             st.info("暂无 BOM 数据")
         else:
-            # 过滤
-            filtered_boms = boms
-            if search_term:
-                filtered_boms = [b for b in boms if search_term in b.get('bom_code', '').lower() or search_term in b.get('bom_name', '').lower()]
+            # 转换为 DataFrame 用于展示
+            bom_df = pd.DataFrame([
+                {"id": b["id"], "编号": b.get("bom_code"), "名称": b.get("bom_name"), "类型": b.get("bom_type")}
+                for b in boms
+            ])
             
-            for bom in filtered_boms:
-                label = f"{bom.get('bom_code')} - {bom.get('bom_name')}"
-                btn_type = "primary" if str(bom.get('id')) == str(st.session_state.bom_active_id) else "secondary"
-                
-                # 使用列布局放置删除按钮 (仅在悬停或选中时显示比较复杂，这里简化为每行一个删除小按钮不太好看，
-                # 建议在详情页做删除，这里只做列表选择)
-                if st.button(label, key=f"bom_sel_{bom['id']}", type=btn_type, use_container_width=True):
-                    st.session_state.bom_active_id = bom['id']
+            # 搜索过滤
+            search_term = st.text_input("🔍 搜索", placeholder="输入编号或名称...").strip().lower()
+            if search_term:
+                bom_df = bom_df[bom_df["编号"].str.lower().contains(search_term) | bom_df["名称"].str.lower().contains(search_term)]
+
+            event = st.dataframe(
+                bom_df,
+                hide_index=True,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                column_config={"id": None} # 隐藏 ID 列
+            )
+            
+            # 处理选择逻辑
+            if event and event.selection and event.selection.rows:
+                selected_idx = event.selection.rows[0]
+                selected_id = bom_df.iloc[selected_idx]["id"]
+                if selected_id != st.session_state.bom_active_id:
+                    st.session_state.bom_active_id = selected_id
                     st.session_state.bom_edit_mode = False
                     st.rerun()
 
     with col_detail:
         if st.session_state.bom_active_id == "new":
-            _render_bom_form(data_manager, None)
+            with st.container(border=True):
+                _render_bom_form(data_manager, None)
         elif st.session_state.bom_active_id:
             bom_id = st.session_state.bom_active_id
             bom = next((b for b in boms if b.get('id') == bom_id), None)
             
-            # 判断是否处于编辑模式 (修改现有 BOM)
-            if st.session_state.get("bom_edit_mode", False):
-                 if bom:
-                    _render_bom_form(data_manager, bom)
-                 else:
-                     st.info("BOM 未找到")
-            elif bom:
-                _render_bom_detail(data_manager, bom)
-            else:
-                st.info("BOM 未找到 (可能已删除)")
-                if st.button("返回列表"):
-                    st.session_state.bom_active_id = None
-                    st.rerun()
+            with st.container(border=True):
+                if st.session_state.get("bom_edit_mode", False):
+                     if bom:
+                        _render_bom_form(data_manager, bom)
+                     else:
+                         st.info("BOM 未找到")
+                elif bom:
+                    _render_bom_detail(data_manager, bom, bom_service)
+                else:
+                    st.info("请在左侧选择 BOM")
         else:
-            st.info("请选择左侧 BOM 查看详情")
+            st.info("👈 请从左侧列表中选择一个 BOM 查看详情")
 
 def _render_bom_form(data_manager, bom=None):
     st.markdown("#### 编辑 BOM 基本信息")
@@ -211,127 +275,99 @@ def _render_bom_form(data_manager, bom=None):
              st.session_state.bom_edit_mode = False
              st.rerun()
 
-def _render_bom_detail(data_manager, bom):
+def _render_bom_detail(data_manager, bom, bom_service):
     user = st.session_state.get("user")
+    
+    # Header with status and type
     col_title, col_ops = st.columns([3, 1])
     with col_title:
         st.markdown(f"### {bom.get('bom_code')} - {bom.get('bom_name')}")
-        
         mode = bom.get('production_mode', '自产')
         mode_text = f"{mode}"
         if mode == "代工":
             mode_text += f" ({bom.get('oem_manufacturer', '-')})"
-            
         st.caption(f"类型: {bom.get('bom_type')} | 状态: {bom.get('status')} | 模式: {mode_text}")
     
     with col_ops:
-        if st.button("🗑️ 删除 BOM", type="primary"):
+        if st.button("✏️ 编辑", use_container_width=True):
+             st.session_state.bom_edit_mode = True
+             st.rerun()
+        if st.button("🗑️ 删除", type="primary", use_container_width=True):
             st.session_state[f"confirm_del_bom_{bom['id']}"] = True
-        
-        if st.session_state.get(f"confirm_del_bom_{bom['id']}", False):
-            st.warning("确定要删除吗？这将删除该 BOM 及其所有版本。")
+            
+    if st.session_state.get(f"confirm_del_bom_{bom['id']}", False):
+        with st.container(border=True):
+            st.warning("确定要删除该 BOM 及其所有版本吗？")
             pwd = st.text_input("管理员口令", type="password", key=f"del_bom_pwd_{bom['id']}")
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("✅ 确认", key=f"yes_del_{bom['id']}"):
+                if st.button("✅ 确认", key=f"yes_del_{bom['id']}", use_container_width=True):
                     if not pwd:
                         st.error("请填写管理员口令")
                     elif not data_manager.verify_admin_password(pwd):
                         st.error("管理员口令错误")
                     elif data_manager.delete_bom(bom['id']):
                         st.success("已删除")
-                        detail = f"删除 BOM {bom.get('bom_code')} - {bom.get('bom_name')} (ID={bom.get('id')})"
-                        data_manager.add_audit_log(user, "BOM_DELETED", detail)
                         st.session_state.bom_active_id = None
                         del st.session_state[f"confirm_del_bom_{bom['id']}"]
                         st.rerun()
             with c2:
-                if st.button("❌ 取消", key=f"no_del_{bom['id']}"):
+                if st.button("❌ 取消", key=f"no_del_{bom['id']}", use_container_width=True):
                      del st.session_state[f"confirm_del_bom_{bom['id']}"]
                      st.rerun()
-                     
-    if st.button("✏️ 编辑基本信息"):
-         st.session_state.bom_edit_mode = True
-         st.rerun()
 
-    # 结构树可视化
-    with st.expander("🌳 查看多级 BOM 结构树"):
-        bom_tree = bom_service.get_bom_tree_structure(bom['id'])
-        if bom_tree:
-            _render_bom_tree_from_struct(bom_tree)
-        else:
-            st.info("无法加载 BOM 结构")
+    # Visual BOM Tree
+    st.markdown("#### 🌳 BOM 结构可视化")
+    bom_tree = bom_service.get_bom_tree_structure(bom['id'])
+    if bom_tree:
+        _render_bom_tree_graphviz(bom_tree)
+    else:
+        st.info("该 BOM 尚未配置有效版本或结构为空。")
 
     st.divider()
-    st.markdown("#### 版本管理")
+    st.markdown("#### 📄 版本管理")
     
     versions = data_manager.get_bom_versions(bom['id'])
     versions = sorted(versions, key=lambda v: int(v.get("id", 0)))
 
     if len(versions) >= 2:
         with st.expander("🔍 版本比对", expanded=False):
-            ver_map = {}
-            ver_labels = []
-            for v in versions:
-                label = f"{v.get('version', '')} (ID={v.get('id')}) | 生效 {v.get('effective_from', '-')}"
-                ver_map[label] = v
-                ver_labels.append(label)
+            ver_map = {f"{v.get('version')} (生效: {v.get('effective_from')})": v for v in versions}
+            ver_labels = list(ver_map.keys())
             col_a, col_b = st.columns(2)
             with col_a:
-                sel_a_label = st.selectbox(
-                    "版本 A",
-                    ver_labels,
-                    key=f"bom_ver_cmp_a_{bom['id']}"
-                )
+                sel_a_label = st.selectbox("版本 A", ver_labels, key=f"bom_ver_cmp_a_{bom['id']}")
             with col_b:
-                default_index_b = 1 if len(ver_labels) > 1 else 0
-                sel_b_label = st.selectbox(
-                    "版本 B",
-                    ver_labels,
-                    index=default_index_b,
-                    key=f"bom_ver_cmp_b_{bom['id']}"
-                )
+                sel_b_label = st.selectbox("版本 B", ver_labels, index=min(1, len(ver_labels)-1), key=f"bom_ver_cmp_b_{bom['id']}")
+            
             ver_a = ver_map.get(sel_a_label)
             ver_b = ver_map.get(sel_b_label)
-            if not ver_a or not ver_b or ver_a.get("id") == ver_b.get("id"):
-                st.info("请选择两个不同的版本进行对比。")
-            else:
-                st.caption(f"对比方向：{ver_a.get('version')} → {ver_b.get('version')}")
-                # 使用 Service 计算差异
+            if ver_a and ver_b and ver_a.get("id") != ver_b.get("id"):
                 diff_list = bom_service.get_bom_version_diff(ver_a, ver_b)
-                if not diff_list:
-                    st.info("两个版本在物料构成和用量上没有差异。")
-                else:
-                    # 转换为 DataFrame 展示
-                    diff_data = []
-                    for d in diff_list:
-                        change_type = d['type']
-                        if change_type == 'modified':
-                            desc = f"修改: {d['old_qty']} -> {d['new_qty']}"
-                        elif change_type == 'added':
-                            desc = f"新增: {d['qty']}"
-                        else:
-                            desc = f"删除: {d['qty']}"
-                        diff_data.append({
-                            "物料": d['item_name'],
-                            "类型": change_type,
+                if diff_list:
+                    diff_df = pd.DataFrame([
+                        {
+                            "物料": d['item_name'], 
+                            "类型": {"modified": "修改", "added": "新增", "deleted": "删除"}.get(d['type']),
                             "单位": d['uom'],
-                            "详情": desc
-                        })
-                    st.dataframe(pd.DataFrame(diff_data), use_container_width=True)
-    
-    if st.button("➕ 新增版本"):
+                            "详情": f"{d['old_qty']} -> {d['new_qty']}" if d['type'] == 'modified' else f"{d.get('qty', '-')}"
+                        } for d in diff_list
+                    ])
+                    st.dataframe(diff_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("两个版本无差异")
+
+    if st.button("➕ 新增版本", type="primary"):
+        # 自动生成版本号逻辑
         existing_nums = []
         for v in versions:
             vcode = str(v.get("version", "")).strip()
             if vcode.upper().startswith("V"):
-                try:
-                    n = int(vcode[1:])
-                    existing_nums.append(n)
-                except Exception:
-                    pass
+                try: existing_nums.append(int(vcode[1:]))
+                except: pass
         next_num = max(existing_nums) + 1 if existing_nums else 1
         new_ver_num = f"V{next_num}"
+        
         ver_data = {
             "bom_id": bom['id'],
             "version": new_ver_num,
@@ -340,15 +376,12 @@ def _render_bom_detail(data_manager, bom):
             "lines": []
         }
         data_manager.add_bom_version(ver_data)
-        if user:
-            detail = f"为 BOM {bom.get('bom_code')} 新增版本 {new_ver_num}"
-            data_manager.add_audit_log(user, "BOM_VERSION_CREATED", detail)
         st.rerun()
         
     if not versions:
-        st.info("暂无版本，请点击新增")
+        st.info("暂无版本数据")
     else:
-        ver_tabs = st.tabs([f"{v.get('version', 'V?')} (ID={v.get('id')})" for v in versions])
+        ver_tabs = st.tabs([f"{v.get('version')} ({v.get('status') or 'approved'})" for v in versions])
         materials = data_manager.get_all_raw_materials()
         mat_options = {f"{m['name']} ({m.get('material_number')})": m['id'] for m in materials}
         for i, ver in enumerate(versions):
@@ -677,286 +710,301 @@ def _render_production_management(data_manager, bom_service):
         return
     
     if "prod_view" not in st.session_state:
-        st.session_state.prod_view = "list" # list, create, detail
+        st.session_state.prod_view = "list"
     if "active_order_id" not in st.session_state:
         st.session_state.active_order_id = None
         
+    orders = data_manager.get_all_production_orders()
+    
+    # --- KPI 看板 ---
     if st.session_state.prod_view == "list":
-        if st.button("➕ 创建生产单"):
-            st.session_state.prod_view = "create"
-            st.rerun()
-            
-        orders = data_manager.get_all_production_orders()
+        status_counts = {"draft": 0, "released": 0, "issued": 0, "finished": 0}
+        for o in orders:
+            st_code = o.get("status", "draft")
+            if st_code in status_counts:
+                status_counts[st_code] += 1
+        
+        with st.container(border=True):
+            st.markdown("##### 📊 生产概览")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("草稿", status_counts["draft"])
+            c2.metric("已下达", status_counts["released"])
+            c3.metric("领料中", status_counts["issued"])
+            c4.metric("已完工", status_counts["finished"])
+
+    if st.session_state.prod_view == "list":
+        col_btn, col_search = st.columns([1, 3])
+        with col_btn:
+            if st.button("➕ 创建生产单", type="primary", use_container_width=True):
+                st.session_state.prod_view = "create"
+                st.rerun()
         
         if not orders:
             st.info("暂无生产单")
         else:
-            status_count = {}
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            today_orders = []
-            for o in orders:
-                st_code = o.get("status", "")
-                status_count[st_code] = status_count.get(st_code, 0) + 1
-                created = str(o.get("created_at", ""))
-                if created.startswith(today_str):
-                    today_orders.append(o)
-            issues_all = data_manager.get_material_issues()
-            issue_by_order = {}
-            for iss in issues_all:
-                oid = iss.get("production_order_id")
-                if oid not in issue_by_order:
-                    issue_by_order[oid] = []
-                issue_by_order[oid].append(iss)
-            anomaly_orders = set()
-            for o in orders:
-                oid = o.get("id")
-                st_code = o.get("status", "")
-                related_issues = issue_by_order.get(oid, [])
-                if st_code == "released" and not related_issues:
-                    anomaly_orders.add(oid)
-                if st_code == "issued":
-                    has_posted = any(i.get("status") == "posted" for i in related_issues)
-                    if not has_posted:
-                        anomaly_orders.add(oid)
-            st.markdown("#### 生产看板")
-            c_k1, c_k2, c_k3, c_k4 = st.columns(4)
-            with c_k1:
-                st.metric("今日新建", len(today_orders))
-            with c_k2:
-                st.metric("草稿数量", status_count.get("draft", 0))
-            with c_k3:
-                st.metric("进行中", status_count.get("released", 0) + status_count.get("issued", 0))
-            with c_k4:
-                st.metric("已完工", status_count.get("finished", 0))
-            if anomaly_orders:
-                st.warning(f"存在 {len(anomaly_orders)} 条可能异常的生产单")
-            
-            # --- 筛选与搜索 ---
+            # 数据转换
             boms = data_manager.get_all_boms()
-            bom_map = {}
-            for b in boms:
-                code = str(b.get('bom_code', '')).strip()
-                name = str(b.get('bom_name', '')).strip()
-                bom_map[b.get('id')] = f"{code}-{name}" if code else name
-
-            with st.expander("🔍 筛选与搜索", expanded=True):
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    search_keyword = st.text_input("关键词 (单号)", placeholder="输入生产单号...").strip().lower()
-                    
-                    all_statuses = sorted(list(set([o.get("status", "") for o in orders])))
-                    filter_status = st.multiselect("状态", all_statuses, default=[])
-                    
-                with col_f2:
-                    filter_date = st.date_input("创建日期范围", value=[], help="选择起始日期和结束日期")
-                    
-                    unique_bom_ids = set([o.get("bom_id") for o in orders])
-                    prod_options = sorted([bom_map.get(bid, "Unknown") for bid in unique_bom_ids])
-                    filter_products = st.multiselect("产品名称", prod_options)
-
-            # 应用筛选
-            if search_keyword:
-                orders = [o for o in orders if search_keyword in o.get('order_code', '').lower()]
+            bom_map = {b['id']: f"{b.get('bom_code')}-{b.get('bom_name')}" for b in boms}
             
-            if filter_status:
-                orders = [o for o in orders if o.get('status') in filter_status]
-                
-            if filter_products:
-                orders = [o for o in orders if bom_map.get(o.get('bom_id'), "Unknown") in filter_products]
-                
-            if filter_date:
-                if len(filter_date) == 2:
-                    s_date, e_date = filter_date
-                    s_str = s_date.strftime("%Y-%m-%d")
-                    e_str = e_date.strftime("%Y-%m-%d")
-                    # created_at format usually "YYYY-MM-DD HH:MM:SS"
-                    orders = [o for o in orders if s_str <= str(o.get('created_at', ''))[:10] <= e_str]
-                elif len(filter_date) == 1:
-                    d_str = filter_date[0].strftime("%Y-%m-%d")
-                    orders = [o for o in orders if str(o.get('created_at', '')).startswith(d_str)]
-            
-            orders.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-            
-            display_rows = []
+            order_data = []
             for o in orders:
-                pname = bom_map.get(o.get('bom_id'), "")
-                display_rows.append({
-                    "产品名称": pname,
-                    "生产单号": o.get("order_code", ""),
-                    "状态": o.get("status", ""),
-                    "计划产量 (kg)": o.get("plan_qty", 0),
-                    "生产日期": o.get("plan_date", ""),
-                    "创建时间": o.get("created_at", "")
+                order_data.append({
+                    "id": o["id"],
+                    "单号": o.get("order_code"),
+                    "产品": bom_map.get(o.get("bom_id"), "Unknown"),
+                    "计划产量": f"{o.get('plan_qty')} kg",
+                    "状态": o.get("status"),
+                    "日期": o.get("plan_date") or o.get("created_at", "")[:10]
                 })
-            df_orders = pd.DataFrame(display_rows)
-            st.dataframe(df_orders, use_container_width=True)
-            _render_export_download(df_orders, "生产单列表", "orders_export")
-            st.divider()
-            plan_batch_kg = 10000.0
-            raw_materials = data_manager.get_all_raw_materials()
-            mat_inv = {}
-            for m in raw_materials:
-                qty = float(m.get("stock_quantity", 0.0))
-                unit = m.get("unit", "kg")
-                base_qty, ok = convert_quantity(qty, unit, "kg")
-                mat_inv[m["id"]] = base_qty if ok else qty
-            target_types = ["母液", "速凝剂"]
-            type_boms = [b for b in boms if b.get("bom_type") in target_types]
-            def per_batch_require(v):
-                base = float(v.get("yield_base", 1000.0) or 1000.0)
-                if base <= 0:
-                    base = 1000.0
-                ratio = plan_batch_kg / base
-                req = {}
-                for line in v.get("lines", []):
-                    if line.get("item_type", "raw_material") == "raw_material":
-                        mid = line.get("item_id")
-                        lqty = float(line.get("qty", 0.0))
-                        luom = line.get("uom", "kg")
-                        need = lqty * ratio
-                        need_kg, ok = convert_quantity(need, luom, "kg")
-                        req[mid] = req.get(mid, 0.0) + (need_kg if ok else need)
-                return req
-            def scarcity_score(req):
-                s = 0.0
-                for mid, q in req.items():
-                    avail = mat_inv.get(mid, 0.0)
-                    w = 1.0 / (avail if avail > 0 else 1e-9)
-                    s += q * w
-                return s
-            candidates = []
-            for b in type_boms:
-                v = data_manager.get_effective_bom_version(b["id"])
-                if not v:
-                    continue
-                req = per_batch_require(v)
-                if not req:
-                    continue
-                score = scarcity_score(req)
-                batches = min([int((mat_inv.get(mid, 0.0)) // q) if q > 0 else 0 for mid, q in req.items()]) if req else 0
-                candidates.append({
-                    "bom_id": b["id"],
-                    "bom_label": bom_map.get(b["id"]),
-                    "bom_type": b.get("bom_type"),
-                    "version_id": v["id"],
-                    "per_batch_require": req,
-                    "scarcity_score": score,
-                    "max_batches_possible": batches
-                })
-            by_type = {}
-            for c in candidates:
-                t = c["bom_type"]
-                if t not in by_type or c["scarcity_score"] < by_type[t]["scarcity_score"]:
-                    by_type[t] = c
-            report_rows = []
-            for t, sel in by_type.items():
-                total_req = sum(sel["per_batch_require"].values())
-                report_rows.append({
-                    "产品类型": t,
-                    "选用配方": sel["bom_label"],
-                    "可生产批次": sel["max_batches_possible"],
-                    "每批次原材料合计(kg)": round(total_req, 4)
-                })
-            if report_rows:
-                orders_all = data_manager.get_all_production_orders()
-                all_boms = data_manager.get_all_boms()
-                bom_type_map = {b.get("id"): b.get("bom_type") for b in all_boms}
-                all_versions = data_manager.get_all_bom_versions()
-                ver_map = {v.get("id"): v for v in all_versions}
-                target_mat_ids = set()
-                for b in type_boms:
-                    v = data_manager.get_effective_bom_version(b["id"])
-                    if not v:
-                        continue
-                    for line in v.get("lines", []):
-                        if line.get("item_type", "raw_material") == "raw_material":
-                            mid = line.get("item_id")
-                            if mid:
-                                target_mat_ids.add(mid)
-                mat_prod_count = {}
-                for o in orders_all:
-                    status = o.get("status")
-                    if status not in ["released", "issued", "finished"]:
-                        continue
-                    bid = o.get("bom_id")
-                    if bom_type_map.get(bid) not in target_types:
-                        continue
-                    ver = ver_map.get(o.get("bom_version_id"))
-                    if not ver:
-                        continue
-                    used_mids = set()
-                    for line in ver.get("lines", []):
-                        if line.get("item_type", "raw_material") == "raw_material":
-                            mid = line.get("item_id")
-                            if mid:
-                                used_mids.add(mid)
-                    for mid in used_mids:
-                        mat_prod_count[mid] = mat_prod_count.get(mid, 0) + 1
-                st.markdown("##### 原材料消耗与预警")
-                warn_rows = []
-                for m in raw_materials:
-                    mid = m["id"]
-                    name = m["name"]
-                    avail = mat_inv.get(mid, 0.0)
-                    stock_qty = float(m.get("stock_quantity", 0.0))
-                    stock_unit = m.get("unit", "kg")
-                    stock_ton, stock_ok = convert_quantity(stock_qty, stock_unit, "ton")
-                    display_stock = round(stock_ton, 4) if stock_ok else round(stock_qty, 4)
-                    need_30 = 0.0
-                    for t, sel in by_type.items():
-                        q = sel["per_batch_require"].get(mid, 0.0)
-                        need_30 += q * 3
-                    est_batches = 0
-                    if need_30 > 0:
-                        est_batches = round(avail / (need_30 / 3.0), 4)
-                    warn = avail < need_30 and need_30 > 0
-                    prod_times = mat_prod_count.get(mid, 0)
-                    is_target_mat = mid in target_mat_ids
-                    warn_rows.append({
-                        "原材料名称": name,
-                        "当前库存(吨)": display_stock,
-                        "预计剩余生产批次": est_batches,
-                        "预警": "是" if warn else "否",
-                        "生产次数": prod_times,
-                        "母液/速凝原材料": "是" if is_target_mat else "否"
-                    })
-                df_warn = pd.DataFrame(warn_rows)
-                def _hl(row):
-                    low_prod = row.get("母液/速凝原材料") == "是" and row.get("生产次数", 0) < 3
-                    trigger = row["预警"] == "是" or low_prod
-                    return ['background-color: #ffecec; color: #c1121f' if trigger else '' for _ in row]
-                st.dataframe(df_warn.style.apply(_hl, axis=1), use_container_width=True)
-                _render_export_download(df_warn, "原材料预警", "warn_export")
-                col_exec1, col_exec2 = st.columns(2)
-                with col_exec1:
-                    if st.button("创建10吨生产单"):
-                        user = st.session_state.get("user")
-                        for t, sel in by_type.items():
-                            new_order = {
-                                "order_code": f"PROD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}",
-                                "bom_id": sel["bom_id"],
-                                "bom_version_id": sel["version_id"],
-                                "plan_qty": plan_batch_kg,
-                                "status": "draft",
-                                "production_mode": "自产",
-                                "oem_manufacturer": ""
-                            }
-                            new_id = data_manager.add_production_order(new_order)
-                            if user and new_id:
-                                detail = f"根据生产计划为 BOM {sel.get('bom_label')} 创建生产单 #{new_id}，计划产量 {plan_batch_kg} kg"
-                                data_manager.add_audit_log(user, "PROD_ORDER_CREATED_PLAN", detail)
-                        st.success("已创建生产单")
-                        st.rerun()
             
-            # 选择操作
-            c_sel, c_btn = st.columns([3, 1])
-            with c_sel:
-                selected_oid = st.selectbox("选择生产单查看详情", [o['id'] for o in orders], format_func=lambda x: f"Order #{x} - {next((o['order_code'] for o in orders if o['id']==x), '')}")
-            with c_btn:
-                if st.button("查看详情"):
-                    st.session_state.active_order_id = selected_oid
+            df_orders = pd.DataFrame(order_data)
+            
+            # 列表展示 (带选择)
+            st.markdown("#### 📋 订单列表")
+            event = st.dataframe(
+                df_orders,
+                hide_index=True,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                column_config={
+                    "id": None,
+                    "状态": st.column_config.SelectboxColumn(
+                        "状态",
+                        options=["draft", "released", "issued", "finished"],
+                        required=True,
+                    )
+                }
+            )
+            
+            if event and event.selection and event.selection.rows:
+                idx = event.selection.rows[0]
+                st.session_state.active_order_id = df_orders.iloc[idx]["id"]
+                st.session_state.prod_view = "detail"
+                st.rerun()
+
+            # 原材料预警 (简化版，放在看板下方)
+            with st.expander("⚠️ 原材料预警与消耗分析"):
+                _render_production_scarcity_analysis(data_manager, boms, bom_map)
+
+    elif st.session_state.prod_view == "create":
+        _render_production_create(data_manager)
+            
+    elif st.session_state.prod_view == "detail":
+        _render_production_detail(data_manager, inventory_service)
+
+def _render_production_scarcity_analysis(data_manager, boms, bom_map):
+    """提取原有的预警逻辑到独立函数"""
+    raw_materials = data_manager.get_all_raw_materials()
+    mat_inv = {}
+    for m in raw_materials:
+        qty = float(m.get("stock_quantity", 0.0))
+        unit = m.get("unit", "kg")
+        base_qty, ok = convert_quantity(qty, unit, "kg")
+        mat_inv[m["id"]] = base_qty if ok else qty
+
+    plan_batch_kg = 10000.0
+    target_types = ["母液", "速凝剂"]
+    type_boms = [b for b in boms if b.get("bom_type") in target_types]
+
+    def per_batch_require(v):
+        base = float(v.get("yield_base", 1000.0) or 1000.0)
+        if base <= 0: base = 1000.0
+        ratio = plan_batch_kg / base
+        req = {}
+        for line in v.get("lines", []):
+            if line.get("item_type", "raw_material") == "raw_material":
+                mid = line.get("item_id")
+                lqty = float(line.get("qty", 0.0))
+                luom = line.get("uom", "kg")
+                need = lqty * ratio
+                need_kg, ok = convert_quantity(need, luom, "kg")
+                req[mid] = req.get(mid, 0.0) + (need_kg if ok else need)
+        return req
+
+    def scarcity_score(req):
+        s = 0.0
+        for mid, q in req.items():
+            avail = mat_inv.get(mid, 0.0)
+            w = 1.0 / (avail if avail > 0 else 1e-9)
+            s += q * w
+        return s
+
+    candidates = []
+    for b in type_boms:
+        v = data_manager.get_effective_bom_version(b["id"])
+        if not v: continue
+        req = per_batch_require(v)
+        if not req: continue
+        score = scarcity_score(req)
+        batches = min([int((mat_inv.get(mid, 0.0)) // q) if q > 0 else 0 for mid, q in req.items()]) if req else 0
+        candidates.append({
+            "bom_id": b["id"], "bom_label": bom_map.get(b["id"]), "bom_type": b.get("bom_type"),
+            "version_id": v["id"], "per_batch_require": req, "scarcity_score": score, "max_batches_possible": batches
+        })
+
+    by_type = {}
+    for c in candidates:
+        t = c["bom_type"]
+        if t not in by_type or c["scarcity_score"] < by_type[t]["scarcity_score"]:
+            by_type[t] = c
+
+    if by_type:
+        warn_rows = []
+        target_mat_ids = set()
+        for b in type_boms:
+            v = data_manager.get_effective_bom_version(b["id"])
+            if v:
+                for line in v.get("lines", []):
+                    if line.get("item_type") == "raw_material":
+                        target_mat_ids.add(line.get("item_id"))
+
+        for m in raw_materials:
+            mid = m["id"]
+            avail = mat_inv.get(mid, 0.0)
+            need_30 = sum(sel["per_batch_require"].get(mid, 0.0) * 3 for sel in by_type.values())
+            warn = avail < need_30 and need_30 > 0
+            
+            warn_rows.append({
+                "物料": m["name"],
+                "当前库存(吨)": round(convert_quantity(avail, "kg", "ton")[0], 2),
+                "预警": "🔴 缺料" if warn else "🟢 正常",
+                "核心物料": "是" if mid in target_mat_ids else "否"
+            })
+        
+        df_warn = pd.DataFrame(warn_rows)
+        st.dataframe(df_warn, use_container_width=True, hide_index=True)
+        
+        if st.button("🚀 一键生成生产计划 (10吨/单)", type="primary"):
+            for t, sel in by_type.items():
+                new_order = {
+                    "order_code": f"PROD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}",
+                    "bom_id": sel["bom_id"], "bom_version_id": sel["version_id"],
+                    "plan_qty": plan_batch_kg, "status": "draft", "production_mode": "自产"
+                }
+                data_manager.add_production_order(new_order)
+            st.success("已生成推荐生产单")
+            st.rerun()
+
+def _render_production_create(data_manager):
+    st.markdown("#### 🏭 新建生产订单")
+    with st.container(border=True):
+        boms = data_manager.get_all_boms()
+        bom_opts = {f"{b.get('bom_code')}-{b['bom_name']}": b for b in boms}
+        sel_bom_label = st.selectbox("选择产品 BOM", list(bom_opts.keys()))
+        sel_bom = bom_opts[sel_bom_label]
+        
+        versions = data_manager.get_bom_versions(sel_bom["id"])
+        ver_opts = {f"{v.get('version')} (生效: {v.get('effective_from')})": v for v in versions if v.get("status") == "approved"}
+        
+        if not ver_opts:
+            st.error("该 BOM 没有已批准的版本，无法生产")
+            if st.button("返回"):
+                st.session_state.prod_view = "list"
+                st.rerun()
+            return
+
+        sel_ver_label = st.selectbox("选择版本", list(ver_opts.keys()))
+        sel_ver = ver_opts[sel_ver_label]
+        
+        with st.form("new_order_form"):
+            plan_qty = st.number_input("计划产量 (kg)", min_value=100.0, step=100.0, value=1000.0)
+            plan_date = st.date_input("计划日期", datetime.now())
+            prod_mode = st.radio("生产模式", ["自产", "代工"], horizontal=True)
+            oem_name = st.text_input("代工厂家", placeholder="若是代工请填写")
+            
+            if st.form_submit_button("确认创建", type="primary"):
+                new_order = {
+                    "order_code": f"PROD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}",
+                    "bom_id": sel_bom["id"],
+                    "bom_version_id": sel_ver["id"],
+                    "plan_qty": plan_qty,
+                    "plan_date": plan_date.strftime("%Y-%m-%d"),
+                    "status": "draft",
+                    "production_mode": prod_mode,
+                    "oem_manufacturer": oem_name if prod_mode == "代工" else ""
+                }
+                new_id = data_manager.add_production_order(new_order)
+                if new_id:
+                    st.session_state.active_order_id = new_id
                     st.session_state.prod_view = "detail"
                     st.rerun()
+        
+        if st.button("取消"):
+            st.session_state.prod_view = "list"
+            st.rerun()
+
+def _render_production_detail(data_manager, inventory_service):
+    order_id = st.session_state.active_order_id
+    orders = data_manager.get_all_production_orders()
+    order = next((o for o in orders if o.get('id') == order_id), None)
+    
+    if not order:
+        st.error("订单未找到")
+        if st.button("返回列表"):
+            st.session_state.prod_view = "list"
+            st.rerun()
+        return
+
+    # 顶部导航
+    col_back, col_status = st.columns([1, 4])
+    with col_back:
+        if st.button("⬅️ 返回", use_container_width=True):
+            st.session_state.prod_view = "list"
+            st.rerun()
+    
+    # 步骤条
+    with st.container(border=True):
+        _render_step_progress(order.get("status", "draft"))
+
+    # 详情卡片
+    with st.container(border=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"**订单编号**: `{order.get('order_code')}`")
+            st.markdown(f"**计划产量**: `{order.get('plan_qty')} kg`")
+        with c2:
+            st.markdown(f"**生产模式**: `{order.get('production_mode', '自产')}`")
+            st.markdown(f"**计划日期**: `{order.get('plan_date', '-')}`")
+        
+        # 操作按钮
+        st.divider()
+        _render_production_actions(data_manager, order, inventory_service)
+
+def _render_production_actions(data_manager, order, inventory_service):
+    """渲染生产订单的操作按钮和状态流转"""
+    status = order.get("status")
+    
+    if status == 'draft':
+        if st.button("🚀 下达生产 (Release)", type="primary", use_container_width=True):
+            data_manager.update_production_order(order['id'], {"status": "released"})
+            st.rerun()
+            
+    elif status == 'released':
+        if st.button("📄 生成领料单", type="primary", use_container_width=True):
+            issue_id = data_manager.create_issue_from_order(order['id'])
+            if issue_id:
+                data_manager.update_production_order(order['id'], {"status": "issued"})
+                st.rerun()
+                
+    elif status == 'issued':
+        issues = data_manager.get_material_issues(order['id'])
+        all_posted = all(i.get('status') == 'posted' for i in issues) if issues else False
+        
+        if not all_posted:
+            st.warning("请先完成所有领料单的过账")
+            for iss in issues:
+                if iss.get('status') == 'draft':
+                    if st.button(f"✅ 领料过账: {iss.get('issue_code')}", key=f"post_{iss['id']}", use_container_width=True):
+                        data_manager.post_issue(iss['id'])
+                        st.rerun()
+        else:
+            if st.button("🏁 完工入库 (Finish)", type="primary", use_container_width=True):
+                data_manager.finish_production_order(order['id'], operator="User")
+                st.rerun()
+    
+    elif status == 'finished':
+        st.success("🎉 该订单已完工入库")
                 
     elif st.session_state.prod_view == "create":
         st.markdown("#### 新建生产单")
