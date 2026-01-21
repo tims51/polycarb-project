@@ -131,14 +131,15 @@ class InventoryService:
             stock_dist.append({
                 "product_name": name,
                 "current_stock": qty,
-                "type": p.get("type")
+                "type": p.get("type"),
+                "unit": p.get("unit", "吨")
             })
             
         return {
             "total_stock": total_stock,
             "product_count": product_count,
             "low_stock_items": low_stock_items,
-            "stock_distribution": pd.DataFrame(stock_dist) if stock_dist else pd.DataFrame(columns=["product_name", "current_stock", "type"])
+            "stock_distribution": pd.DataFrame(stock_dist) if stock_dist else pd.DataFrame(columns=["product_name", "current_stock", "type", "unit"])
         }
 
     def process_inbound(self, product_name: str, product_type: str, quantity: float, batch_no: str, operator: str, date_str: str) -> Tuple[bool, str]:

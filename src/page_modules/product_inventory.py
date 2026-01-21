@@ -37,18 +37,7 @@ def render_product_inventory_page(service: InventoryService):
         
         st.markdown("---")
         
-        # 2. 预警列表
-        if low_count > 0:
-            UIManager.toast(f"⚠️ 以下 {low_count} 个产品库存低于 10 吨，请及时补货！", type="warning")
-            low_df = pd.DataFrame(summary['low_stock_items'])
-            UIManager.render_data_table(
-                low_df[["product_name", "type", "current_stock", "unit"]].rename(columns={
-                    "product_name": "产品名称", "type": "类型", "current_stock": "当前库存", "unit": "单位"
-                }),
-                mobile_cols=["产品名称", "当前库存", "单位"]
-            )
-        
-        # 3. 库存分布图表
+        # 2. 库存分布图表 (提前)
         st.subheader("📈 库存分布")
         dist_df = summary['stock_distribution']
         if not dist_df.empty:
@@ -64,6 +53,54 @@ def render_product_inventory_page(service: InventoryService):
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("暂无库存数据")
+
+        st.markdown("---")
+
+        # 3. 库存清单 (清晰明了的形式)
+        st.subheader("📋 成品库存清单")
+        if not dist_df.empty:
+            # 预警提示
+            if low_count > 0:
+                st.warning(f"⚠️ 注意：有 {low_count} 项产品库存低于预警值 (10吨)")
+            
+            # 格式化表格显示
+            df_display = dist_df.copy()
+            df_display = df_display.rename(columns={
+                "product_name": "产品名称",
+                "type": "类型",
+                "current_stock": "当前库存",
+                "unit": "单位"
+            })
+            
+            # 使用 st.dataframe 提供清晰、可搜索、可排序的表格
+            st.dataframe(
+                df_display,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "当前库存": st.column_config.NumberColumn(
+                        "当前库存",
+                        format="%.3f 吨",
+                        help="当前系统账面库存数量"
+                    ),
+                    "类型": st.column_config.SelectboxColumn(
+                        "类型",
+                        options=["母液", "速凝剂", "复配", "其他"]
+                    )
+                }
+            )
+            
+            # 导出功能
+            csv = df_display.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                "📥 导出库存清单 (CSV)",
+                csv,
+                f"inventory_list_{date.today()}.csv",
+                "text/csv",
+                key='download-inventory-list'
+            )
+        else:
+            st.info("暂无产品库存数据")
 
     # ==================== Tab 2: 库存操作 ====================
     with tab_ops:
