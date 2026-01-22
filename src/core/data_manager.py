@@ -1650,22 +1650,15 @@ class DataManager:
                 "name": product_name,
                 "type": product_type,
                 "stock_quantity": 0.0,
-                "unit": "吨", # 默认单位
+                "unit": "kg", # AI_RULES: 强制 kg
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             inventory.append(new_prod)
             target_prod_idx = len(inventory) - 1
         
         # 更新库存
-        # 注意单位转换：生产单通常是 kg，产品库存是 吨
-        prod_unit = inventory[target_prod_idx].get("unit", "吨")
-        # 假设生产单 plan_qty 单位是 kg (我们在 sap_bom.py 中已经注明了 kg)
-        final_qty, success = convert_quantity(plan_qty, "kg", prod_unit)
-        
-        if not success:
-             # 如果转换失败（比如单位不兼容），默认直接加，但记录警告
-             logger.warning(f"Finish production unit conversion failed: {plan_qty} kg -> {prod_unit}")
-             final_qty = plan_qty
+        # AI_RULES: 生产单 plan_qty 已经是 kg，库存也是 kg，无需转换
+        final_qty = plan_qty
         
         current_stock = float(inventory[target_prod_idx].get("stock_quantity", 0.0))
         new_stock = current_stock + final_qty
@@ -1681,7 +1674,7 @@ class DataManager:
             "product_name": inventory[target_prod_idx]["name"], # 使用库存中实际的产品名称，确保关联正确
             "product_type": product_type,
             "type": StockMovementType.PRODUCE_IN.value, # 明确标记为生产入库
-            "quantity": final_qty,
+            "quantity": final_qty, # kg
             "reason": f"生产完工: {target_order.get('order_code')}",
             "operator": operator,
             "snapshot_stock": new_stock,
@@ -1697,7 +1690,7 @@ class DataManager:
         data[DataCategory.PRODUCT_INVENTORY_RECORDS.value] = records
         
         if self.save_data(data):
-            return True, f"完工入库成功，库存增加 {final_qty:.3f} {prod_unit}"
+            return True, f"完工入库成功，库存增加 {final_qty:.3f} kg"
         return False, "保存失败"
 
     def create_issue_from_order(self, order_id: int) -> Optional[int]:

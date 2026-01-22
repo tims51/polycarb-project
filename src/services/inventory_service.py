@@ -18,6 +18,14 @@ class InventoryService:
     def __init__(self, data_service: DataService = None):
         self.data_service = data_service or DataService()
 
+    def get_all_raw_materials(self) -> List[Dict[str, Any]]:
+        """获取所有原材料信息"""
+        return self.data_service.get_all_raw_materials()
+
+    def get_inventory_records(self) -> List[Dict[str, Any]]:
+        """获取所有库存流水记录"""
+        return self.data_service.get_inventory_records()
+
     def get_stock_balance(self, material_id: Optional[int] = None) -> Union[float, Dict[int, float]]:
         """获取原材料库存余额（支持单位换算）"""
         data = self.data_service.load_data()
@@ -33,16 +41,9 @@ class InventoryService:
             base_unit = normalize_unit(mat_base_units.get(mid, "kg"))
             
             if record_unit:
-                record_unit = normalize_unit(record_unit)
-                if record_unit != base_unit:
-                    if record_unit in ["ton", "吨", "t", "tons"] and base_unit in ["kg", "千克", "kgs"]:
-                        qty *= 1000.0
-                    elif record_unit in ["kg", "千克", "kgs"] and base_unit in ["ton", "吨", "t", "tons"]:
-                        qty /= 1000.0
-                    else:
-                        factor = get_conversion_factor(record_unit, base_unit)
-                        if factor:
-                            qty *= factor
+                # 使用统一的 convert_quantity 进行换算
+                converted_qty, success = convert_quantity(qty, record_unit, base_unit)
+                return converted_qty
             return qty
 
         # 如果指定了 material_id，只计算该物料
@@ -108,98 +109,100 @@ class InventoryService:
         return self.data_service.get_product_inventory()
 
     def get_inventory_summary(self, low_stock_threshold: float = 10.0) -> Dict[str, Any]:
-        """获取成品库存概览（用于看板）"""
+        """获取成品库存概览（用于看板，显示单位为吨，数据库单位为kg）"""
         products = self.get_products()
-        total_stock = sum(float(p.get("stock_quantity", 0.0) or p.get("current_stock", 0.0)) for p in products)
+        # 数据库存储为kg，汇总后除以1000显示为吨
+        total_stock_kg = sum(float(p.get("stock_quantity", 0.0) or p.get("current_stock", 0.0)) for p in products)
+        total_stock_tons = total_stock_kg / 1000.0
         product_count = len(products)
         
         low_stock_items = []
         stock_dist = []
         
+        # 预警阈值从吨转换为kg
+        low_stock_threshold_kg = low_stock_threshold * 1000.0
+        
         for p in products:
-            qty = float(p.get("stock_quantity", 0.0) or p.get("current_stock", 0.0))
+            qty_kg = float(p.get("stock_quantity", 0.0) or p.get("current_stock", 0.0))
             name = p.get("product_name") or p.get("name")
+            qty_tons = qty_kg / 1000.0
             
-            if qty < low_stock_threshold:
+            if qty_kg < low_stock_threshold_kg:
                 low_stock_items.append({
                     "product_name": name,
                     "type": p.get("type"),
-                    "current_stock": qty,
-                    "unit": p.get("unit", "吨")
+                    "current_stock": qty_tons, # UI显示吨
+                    "unit": "吨"
                 })
             
             stock_dist.append({
                 "product_name": name,
-                "current_stock": qty,
+                "current_stock": qty_tons, # UI显示吨
                 "type": p.get("type"),
-                "unit": p.get("unit", "吨")
+                "unit": "吨"
             })
             
         return {
-            "total_stock": total_stock,
+            "total_stock": total_stock_tons,
             "product_count": product_count,
             "low_stock_items": low_stock_items,
             "stock_distribution": pd.DataFrame(stock_dist) if stock_dist else pd.DataFrame(columns=["product_name", "current_stock", "type", "unit"])
         }
 
-    def process_inbound(self, product_name: str, product_type: str, quantity: float, batch_no: str, operator: str, date_str: str) -> Tuple[bool, str]:
-        """处理成品入库"""
-        # 自动转换为基准单位 (吨)
-        # 假设前端传来的是 UI 显示的单位，通常成品就是吨，但这里强制转换确保一致性
-        # 如果 UI 没有传单位，这里假设是吨，或者需要 UI 传参。
-        # 鉴于 process_inbound 签名没有单位，且系统默认成品为吨，这里先不做额外转换，
-        # 或者假设输入就是吨。
-        # 但为了符合 "所有成品...强制统一为吨" 的要求，我们显式确认。
-        # 如果未来 UI 支持其他单位，这里需要修改签名接受 unit。
-        # 目前保持原逻辑，但确保 add_product_inventory_record 内部逻辑正确。
+    def process_inbound(self, product_name: str, product_type: str, quantity_tons: float, batch_no: str, operator: str, date_str: str) -> Tuple[bool, str]:
+        """处理成品入库 (输入为吨，保存为kg)"""
+        qty_kg = quantity_tons * 1000.0
         
         record = {
             "product_name": product_name,
             "product_type": product_type,
             "type": StockMovementType.PRODUCE_IN.value, 
-            "quantity": quantity,
-            "reason": f"手动入库: {batch_no}",
+            "quantity": qty_kg,
+            "reason": f"手动入库: {batch_no} (原: {quantity_tons}吨)",
             "operator": operator,
             "date": date_str,
             "batch_number": batch_no
         }
         return self.data_service.add_product_inventory_record(record)
 
-    def process_outbound(self, product_name: str, quantity: float, customer: str, remark: str, operator: str, date_str: str) -> Tuple[bool, str]:
-        """处理成品出库"""
+    def process_outbound(self, product_name: str, quantity_tons: float, customer: str, remark: str, operator: str, date_str: str) -> Tuple[bool, str]:
+        """处理成品出库 (输入为吨，保存为kg)"""
+        qty_kg = quantity_tons * 1000.0
+        
         record = {
             "product_name": product_name,
             "type": StockMovementType.OUT.value,
-            "quantity": quantity,
-            "reason": f"销售出库: {customer} {remark}",
+            "quantity": qty_kg,
+            "reason": f"销售出库: {customer} {remark} (原: {quantity_tons}吨)",
             "operator": operator,
             "date": date_str,
             "related_doc_type": "SHIPPING"
         }
         return self.data_service.add_product_inventory_record(record)
 
-    def calibrate_stock(self, product_name: str, actual_stock: float, reason: str, operator: str) -> Tuple[bool, str]:
-        """校准成品库存"""
+    def calibrate_stock(self, product_name: str, actual_stock_tons: float, reason: str, operator: str) -> Tuple[bool, str]:
+        """校准成品库存 (输入为吨，保存为kg)"""
         products = self.get_products()
         target = next((p for p in products if (p.get("product_name") or p.get("name")) == product_name), None)
         
         if not target:
             return False, "产品不存在"
         
-        current = float(target.get("stock_quantity", 0.0) or target.get("current_stock", 0.0))
-        diff = actual_stock - current
+        actual_stock_kg = actual_stock_tons * 1000.0
+        current_kg = float(target.get("stock_quantity", 0.0) or target.get("current_stock", 0.0))
+        diff_kg = actual_stock_kg - current_kg
         
-        if abs(diff) < 1e-6:
+        if abs(diff_kg) < 1e-4: # 0.1克量级
             return True, "无差异"
         
-        rtype = StockMovementType.ADJUST_IN.value if diff > 0 else StockMovementType.ADJUST_OUT.value
-        qty = abs(diff)
+        rtype = StockMovementType.ADJUST_IN.value if diff_kg > 0 else StockMovementType.ADJUST_OUT.value
+        qty_kg = abs(diff_kg)
         
         record = {
             "product_name": product_name,
             "type": rtype,
-            "quantity": qty,
-            "reason": f"库存校准: {reason} (账面: {current} -> 实盘: {actual_stock})",
+            "quantity": qty_kg,
+            "reason": f"库存校准: {reason} (账面: {current_kg/1000.0:.3f}吨 -> 实盘: {actual_stock_tons:.3f}吨)",
             "operator": operator,
             "date": datetime.now().strftime("%Y-%m-%d")
         }
@@ -271,16 +274,8 @@ class InventoryService:
             base_unit = normalize_unit(mat_base_units.get(mid, "kg"))
             
             if record_unit:
-                record_unit = normalize_unit(record_unit)
-                if record_unit != base_unit:
-                    if record_unit in ["ton", "吨", "t", "tons"] and base_unit in ["kg", "千克", "kgs"]:
-                        qty *= 1000.0
-                    elif record_unit in ["kg", "千克", "kgs"] and base_unit in ["ton", "吨", "t", "tons"]:
-                        qty /= 1000.0
-                    else:
-                        factor = get_conversion_factor(record_unit, base_unit)
-                        if factor:
-                            qty *= factor
+                # 使用统一的 convert_quantity 进行换算
+                qty, _ = convert_quantity(qty, record_unit, base_unit)
             
             # Logic: Add or Subtract
             if rtype in [StockMovementType.IN.value, StockMovementType.RETURN_IN.value, 
@@ -441,6 +436,59 @@ class InventoryService:
         # 3. Call DataService to persist
         return self.data_service.add_inventory_record(rec_dict)
 
+    def add_raw_material(self, material_data: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        添加原材料 (强制单位转换)
+        如果输入单位是吨，自动转换为 kg 后保存
+        """
+        qty = float(material_data.get("stock_quantity", 0.0))
+        unit = material_data.get("unit", "kg")
+        
+        # 强制转换为 kg
+        qty_kg, success = convert_to_base_unit(qty, unit, 'raw_material')
+        if not success:
+            return False, f"单位转换失败: {unit}"
+            
+        material_data["stock_quantity"] = qty_kg
+        material_data["unit"] = "kg" # 数据库统一存储 kg
+        
+        # 调用 DataService
+        success, msg = self.data_service.add_raw_material(material_data)
+        return success, msg
+
+    def update_raw_material(self, material_id: int, updates: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        更新原材料 (强制单位转换)
+        """
+        if "stock_quantity" in updates:
+            qty = float(updates["stock_quantity"])
+            unit = updates.get("unit", "kg")
+            qty_kg, success = convert_to_base_unit(qty, unit, 'raw_material')
+            if not success:
+                return False, f"单位转换失败: {unit}"
+            updates["stock_quantity"] = qty_kg
+            updates["unit"] = "kg"
+            
+        return self.data_service.update_raw_material(material_id, updates)
+
+    def process_shipping(self, product_name: str, product_type: str, quantity_tons: float, customer: str, remark: str, operator: str, date_str: str) -> Tuple[bool, str]:
+        """
+        处理发货 (输入为吨，保存为kg)
+        """
+        qty_kg = quantity_tons * 1000.0
+        
+        record = {
+            "product_name": product_name,
+            "product_type": product_type,
+            "type": StockMovementType.OUT.value,
+            "quantity": qty_kg,
+            "reason": f"发货: {customer} {remark} (原: {quantity_tons}吨)",
+            "operator": operator,
+            "date": date_str,
+            "related_doc_type": "SHIPPING"
+        }
+        return self.data_service.add_product_inventory_record(record)
+
     def post_issue(self, issue_id: int, operator: str = "System") -> Tuple[bool, str]:
         """
         领料过账
@@ -485,7 +533,7 @@ class InventoryService:
             item_type = line.get("item_type", MaterialType.RAW_MATERIAL.value)
             
             if item_type == MaterialType.PRODUCT.value:
-                # ---------------- 成品扣减 (基准单位: 吨) ----------------
+                # ---------------- 成品扣减 (基准单位: kg) ----------------
                 prod_idx = -1
                 current_stock = 0.0
                 
@@ -507,14 +555,11 @@ class InventoryService:
                                 break
                 
                 if prod_idx != -1:
-                    # Convert to Base Unit (Ton)
+                    # Convert to Base Unit (kg)
                     final_qty, success = convert_to_base_unit(raw_qty, line_uom, 'product')
                     
                     if not success:
                         logger.warning(f"Unit conversion failed (product): {raw_qty} {line_uom} -> {BASE_UNIT_PRODUCT}")
-                        # Fallback: assume 1:1 if conversion fails? Or raise error?
-                        # Safe to continue but log warning, or return False?
-                        # Returning False is safer for data integrity.
                         return False, f"单位转换失败: {line_uom} -> {BASE_UNIT_PRODUCT}"
                     
                     new_stock = current_stock - final_qty
@@ -534,7 +579,7 @@ class InventoryService:
                         "product_name": products[prod_idx].get("product_name") or products[prod_idx].get("name"),
                         "product_type": products[prod_idx].get("type", "其他"),
                         "type": StockMovementType.CONSUME_OUT.value,
-                        "quantity": final_qty, # Stored in Tons
+                        "quantity": final_qty, # Stored in kg
                         "reason": reason_note,
                         "operator": operator,
                         "snapshot_stock": new_stock,
@@ -660,7 +705,7 @@ class InventoryService:
                             break
                             
                 if prod_idx >= 0:
-                    # 使用基准单位 (Ton) 计算回滚
+                    # 使用基准单位 (kg) 计算回滚
                     # 注意：领料时已经转换过了，这里需要重新转换以确保一致
                     final_qty, success = convert_to_base_unit(qty, line_uom, 'product')
                     

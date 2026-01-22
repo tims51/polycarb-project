@@ -87,7 +87,7 @@ def render_sap_bom(bom_service, inventory_service, data_manager):
         _render_production_management(data_manager, bom_service)
 
     with tab3:
-        _render_shipping_management(data_manager)
+        _render_shipping_management(data_manager, inventory_service)
         
     with tab4:
         _render_inventory_reports(data_manager, bom_service)
@@ -157,9 +157,14 @@ def _render_bom_management(data_manager, bom_service):
             ])
             
             # 搜索过滤
-            search_term = st.text_input("🔍 搜索", placeholder="输入编号或名称...").strip().lower()
+            search_term = st.text_input("🔍 搜索", placeholder="输入编号、名称或 ID...").strip().lower()
             if search_term:
-                bom_df = bom_df[bom_df["编号"].str.lower().contains(search_term) | bom_df["名称"].str.lower().contains(search_term)]
+                # 增强搜索以包含 ID
+                bom_df = bom_df[
+                    bom_df["编号"].str.lower().str.contains(search_term, na=False) | 
+                    bom_df["名称"].str.lower().str.contains(search_term, na=False) |
+                    bom_df["id"].astype(str).str.contains(search_term, na=False)
+                ]
 
             event = st.dataframe(
                 bom_df,
@@ -383,7 +388,7 @@ def _render_bom_detail(data_manager, bom, bom_service):
     else:
         ver_tabs = st.tabs([f"{v.get('version')} ({v.get('status') or 'approved'})" for v in versions])
         materials = data_manager.get_all_raw_materials()
-        mat_options = {f"{m['name']} ({m.get('material_number')})": m['id'] for m in materials}
+        mat_options = {f"{m['name']} (ID: {m['id']}) ({m.get('material_number', '-')})": m['id'] for m in materials}
         for i, ver in enumerate(versions):
             with ver_tabs[i]:
                 _render_version_editor(data_manager, ver, mat_options)
@@ -615,14 +620,14 @@ def _render_version_editor(data_manager, version, mat_options):
         else:
             # 获取原材料和成品库存选项
             raw_materials = data_manager.get_all_raw_materials()
-            product_inventory = data_manager.get_product_inventory()
+            product_inventory = inventory_service.get_products()
             
             combined_options = {}
             for m in raw_materials:
-                label = f"[原材料] {m['name']} ({m.get('material_number', '-')})"
+                label = f"[原材料] {m['name']} (ID: {m['id']}) ({m.get('material_number', '-')})"
                 combined_options[label] = f"raw_material:{m['id']}"
             for p in product_inventory:
-                label = f"[成品] {p['name']} ({p.get('type', '其他')})"
+                label = f"[成品] {p.get('product_name') or p.get('name')} (ID: {p['id']}) ({p.get('type', '其他')})"
                 combined_options[label] = f"product:{p['id']}"
 
             with st.form(f"add_line_form_{version['id']}", clear_on_submit=True):
@@ -889,8 +894,8 @@ def _render_production_scarcity_analysis(data_manager, boms, bom_map):
 def _render_production_create(data_manager):
     st.markdown("#### 🏭 新建生产订单")
     with st.container(border=True):
-        boms = data_manager.get_all_boms()
-        bom_opts = {f"{b.get('bom_code')}-{b['bom_name']}": b for b in boms}
+        boms = bom_service.get_all_boms()
+        bom_opts = {f"{b.get('bom_code')}-{b['bom_name']} (ID: {b['id']})": b for b in boms}
         sel_bom_label = st.selectbox("选择产品 BOM", list(bom_opts.keys()))
         sel_bom = bom_opts[sel_bom_label]
         
@@ -1009,13 +1014,13 @@ def _render_production_actions(data_manager, order, inventory_service):
     elif st.session_state.prod_view == "create":
         st.markdown("#### 新建生产单")
         
-        boms = data_manager.get_all_boms()
+        boms = bom_service.get_all_boms()
         bom_opts = {}
         for b in boms:
             code = b.get('bom_code', '').strip()
             name = b['bom_name'].strip()
             base_label = f"{code}-{name}" if code else name
-            label = f"{base_label} (ID={b.get('id')})"
+            label = f"{base_label} (ID: {b.get('id')})"
             bom_opts[label] = b
         sel_bom_label = st.selectbox("选择产品 BOM", list(bom_opts.keys()), key="new_order_bom_label")
         sel_bom = bom_opts[sel_bom_label]
@@ -1028,7 +1033,7 @@ def _render_production_actions(data_manager, order, inventory_service):
             vcode = v.get("version", "")
             vdate = v.get("effective_from", "-")
             vstatus = v.get("status", "") or "approved"
-            label = f"{vcode} (ID={v.get('id')}) | 生效 {vdate} | {vstatus}"
+            label = f"{vcode} (ID: {v.get('id')}) | 生效 {vdate} | {vstatus}"
             ver_map[label] = v
             ver_labels.append(label)
         selected_ver = None
@@ -1321,22 +1326,25 @@ def _render_production_actions(data_manager, order, inventory_service):
                     df_fin = pd.DataFrame(finish_rows)
                     st.dataframe(df_fin, use_container_width=True, hide_index=True)
 
-def _render_shipping_management(data_manager):
+def _render_shipping_management(data_manager, inventory_service):
     st.subheader("发货管理")
     
     # 1. 发货操作区域
     st.markdown("#### 📦 新增发货单")
     
     # 获取成品库存列表
-    inventory = data_manager.get_product_inventory()
+    inventory = inventory_service.get_products()
     if not inventory:
         st.warning("暂无成品库存，无法进行发货操作。请先进行生产入库。")
     else:
         with st.form("shipping_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                # 构造选项: "名称 (库存: 100 吨)"
-                prod_options = {f"{p.get('product_name', 'Unknown')} ({p.get('type', '-')}) - 库存: {float(p.get('current_stock', 0)):.2f} {p.get('unit', '吨')}": p for p in inventory}
+                # 构造选项: "名称 (ID: id) (类型) - 库存: 100 吨"
+                prod_options = {
+                    f"{p.get('product_name') or p.get('name', 'Unknown')} (ID: {p.get('id')}) ({p.get('type', '-')}) - 库存: {float(p.get('stock_quantity', 0) or p.get('current_stock', 0))/1000.0:.2f} 吨": p 
+                    for p in inventory
+                }
                 labels = [""] + list(prod_options.keys())
                 sel_label = st.selectbox("选择发货产品", labels, index=0)
                 
@@ -1370,29 +1378,30 @@ def _render_shipping_management(data_manager):
                         st.error("发货数量必须大于0")
                         st.stop()
                     selected_prod = prod_options[sel_label]
-                    current_stock = float(selected_prod.get('current_stock', 0))
+                    current_stock_kg = float(selected_prod.get('stock_quantity', 0) or selected_prod.get('current_stock', 0))
+                    current_stock_tons = current_stock_kg / 1000.0
                     
-                    if ship_qty > current_stock:
-                        st.error(f"库存不足！当前库存: {current_stock:.2f} 吨")
+                    if ship_qty > current_stock_tons:
+                        st.error(f"库存不足！当前库存: {current_stock_tons:.2f} 吨")
                     else:
                         user = st.session_state.get("user")
                         operator_name = user.get("username") if user else "User"
-                        record_data = {
-                            "product_name": selected_prod.get('product_name', 'Unknown'),
-                            "product_type": selected_prod.get('type', '其他'),
-                            "quantity": ship_qty,
-                            "type": "out",
-                            "reason": f"发货: {customer} {remark}",
-                            "operator": operator_name,
-                            "date": ship_date.strftime("%Y-%m-%d"),
-                            "related_doc_type": "SHIPPING"
-                        }
                         
-                        success, msg = data_manager.add_product_inventory_record(record_data)
+                        # 使用 inventory_service.process_shipping 处理单位转换 (吨 -> kg)
+                        success, msg = inventory_service.process_shipping(
+                            product_name=selected_prod.get('product_name', 'Unknown'),
+                            product_type=selected_prod.get('type', '其他'),
+                            quantity_tons=ship_qty,
+                            customer=customer,
+                            remark=remark,
+                            operator=operator_name,
+                            date_str=ship_date.strftime("%Y-%m-%d")
+                        )
+                        
                         if success:
                             st.success(f"发货成功！已扣减库存 {ship_qty} 吨")
                             if user:
-                                detail = f"发货 {selected_prod['name']}，数量 {ship_qty} 吨，客户 {customer}"
+                                detail = f"发货 {selected_prod['product_name']}，数量 {ship_qty} 吨，客户 {customer}"
                                 data_manager.add_audit_log(user, "SHIPPING_CREATED", detail)
                             st.rerun()
                         else:
@@ -1433,10 +1442,19 @@ def _render_shipping_management(data_manager):
         display_cols = [c for c in cols if c in df_ship.columns]
         
         df_display = df_ship[display_cols].copy()
+        
+        # 修正显示单位：数据库存的是 kg，显示为 吨
+        if "quantity" in df_display.columns:
+            df_display["quantity"] = df_display["quantity"] / 1000.0
+        if "snapshot_stock" in df_display.columns:
+            df_display["snapshot_stock"] = df_display["snapshot_stock"] / 1000.0
+            
         df_display.columns = [c.replace("date", "日期").replace("product_name", "产品名称")
                               .replace("product_type", "类型").replace("quantity", "数量(吨)")
                               .replace("reason", "详情/备注").replace("operator", "操作人")
-                              .replace("snapshot_stock", "发货后结存") for c in df_display.columns]
+                              .replace("snapshot_stock", "发货后结存(吨)") for c in df_display.columns]
+        
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
         
 def _render_inventory_reports(data_manager, bom_service):
     st.subheader("库存台账报表")
@@ -1494,14 +1512,14 @@ def _render_inventory_reports(data_manager, bom_service):
         if records:
             # 补充物料名称 (解决 KeyError: 'material_name')
             materials = data_manager.get_all_raw_materials()
-            mat_map = {m['id']: m['name'] for m in materials}
+            mat_map = {m['id']: f"{m['name']} (ID: {m['id']})" for m in materials}
             
             enriched_records = []
             for r in records:
                 r_copy = r.copy()
-                if "material_name" not in r_copy:
-                    # 尝试从 map 获取，如果没有则显示 ID
-                    r_copy["material_name"] = mat_map.get(r_copy.get("material_id"), f"Unknown-{r_copy.get('material_id')}")
+                # 强制使用带 ID 的名称以防重名歧义
+                mid = r_copy.get("material_id")
+                r_copy["material_name"] = mat_map.get(mid, f"Unknown (ID: {mid})")
                 enriched_records.append(r_copy)
                 
             df = pd.DataFrame(enriched_records)
@@ -1509,9 +1527,9 @@ def _render_inventory_reports(data_manager, bom_service):
             # 1. 增加筛选器
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
-                # 提取所有物料名称供筛选
+                # 使用带 ID 的物料名称供筛选
                 unique_materials = sorted(list(set(df['material_name'].dropna().unique())))
-                sel_mat = st.multiselect("筛选物料", unique_materials)
+                sel_mat = st.multiselect("筛选物料 (支持按名称筛选)", unique_materials)
             with col_f2:
                 # 提取操作类型 (in/out) 并转为中文显示
                 type_map = {"in": "入库", "out": "出库"}
@@ -1635,7 +1653,7 @@ def _render_inventory_reports(data_manager, bom_service):
                     "关联单据号": doc_no,
                     "来源/备注": reason,
                     "操作人": r.get("operator", ""),
-                    "发出后结存": r.get("snapshot_stock", 0)
+                    "发出后结存(吨)": round(float(r.get("snapshot_stock", 0) or 0) / 1000.0, 4)
                 })
             df_cons = pd.DataFrame(display_rows)
             st.dataframe(df_cons, use_container_width=True)

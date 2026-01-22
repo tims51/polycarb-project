@@ -69,7 +69,7 @@ def _render_strength_inputs(container, current_strengths=None, key_prefix=""):
                 
     return new_strengths
 
-def render_data_recording(data_manager):
+def render_data_recording(experiment_service, data_manager):
     """渲染数据记录页面"""
     st.header("📝 数据记录")
     
@@ -86,27 +86,27 @@ def render_data_recording(data_manager):
     
     # ==================== 母液管理模块 ====================
     with tab_mother:
-        _render_mother_liquor_tab(data_manager)
+        _render_mother_liquor_tab(experiment_service, data_manager)
 
     # ==================== 合成实验模块 ====================
     with tab1:
-        _render_synthesis_experiments_tab(data_manager)
+        _render_synthesis_experiments_tab(experiment_service, data_manager)
     
     # ==================== 成品减水剂模块 ====================
     with tab3:
-        _render_products_tab(data_manager)
+        _render_products_tab(experiment_service, data_manager)
     
     # ==================== 净浆实验模块 ====================
     with tab4:
-        _render_paste_experiments_tab(data_manager)
+        _render_paste_experiments_tab(experiment_service, data_manager)
     
     # ==================== 砂浆实验模块 ====================
     with tab5:
-        _render_mortar_experiments_tab(data_manager)
+        _render_mortar_experiments_tab(experiment_service, data_manager)
     
     # ==================== 混凝土实验模块 ====================
     with tab6:
-        _render_concrete_experiments_tab(data_manager)
+        _render_concrete_experiments_tab(experiment_service, data_manager)
 
     # ==================== 数据维护模块 ====================
     with tab7:
@@ -172,7 +172,7 @@ def batch_delete_synthesis_dialog(selected_records, selected_ids, data_manager):
             st.session_state.syn_show_batch_delete_dialog = False
             st.rerun()
 
-def _render_mother_liquor_tab(data_manager):
+def _render_mother_liquor_tab(experiment_service, data_manager):
     """渲染母液管理标签页"""
     st.subheader("💧 母液管理")
 
@@ -182,15 +182,15 @@ def _render_mother_liquor_tab(data_manager):
         
         with st.form("add_mother_liquor_form", clear_on_submit=True):
             if source_type == "合成实验":
-                # 获取所有合成实验
-                synthesis_experiments = data_manager.get_all_synthesis_records()
-                if synthesis_experiments:
-                    # 创建选项列表: ID - 配方编号 (日期)
-                    exp_options = {f"{exp['id']}: {exp.get('formula_id', '未命名')} ({exp.get('synthesis_date', '')})": exp for exp in synthesis_experiments}
-                    selected_exp_key = st.selectbox("选择合成实验*", options=list(exp_options.keys()), key="ml_synthesis_exp")
+                # 获取所有合成实验选项
+                exp_options = experiment_service.get_synthesis_record_options()
+                if exp_options:
+                    # 转换为 selectbox 格式
+                    exp_map = {opt['label']: opt['data'] for opt in exp_options}
+                    selected_exp_key = st.selectbox("选择合成实验*", options=list(exp_map.keys()), key="ml_synthesis_exp")
                     
                     if selected_exp_key:
-                        selected_exp = exp_options[selected_exp_key]
+                        selected_exp = exp_map[selected_exp_key]
                         st.info(f"已选择合成实验: {selected_exp.get('formula_id')} (ID: {selected_exp['id']})")
                         
                         # 自动填充部分信息
@@ -493,32 +493,21 @@ def _render_mother_liquor_tab(data_manager):
         st.info("暂无母液数据")
 
 
-def _render_synthesis_experiments_tab(data_manager):
+def _render_synthesis_experiments_tab(experiment_service, data_manager):
     """渲染合成实验标签页"""
     st.subheader("🧪 合成实验记录")
     
     # 获取数据
     synthesis_records = data_manager.get_all_synthesis_records()
     experiments = data_manager.get_all_experiments()
-    raw_materials = data_manager.get_all_raw_materials()
+    
+    # 使用 experiment_service 获取选项
+    raw_material_options = experiment_service.get_raw_material_options()
+    raw_material_map = {opt['label']: opt['data'] for opt in raw_material_options}
+    raw_material_names = list(raw_material_map.keys())
     
     # 获取实验项目选项
-    experiment_options = {f"{e['id']}: {e['name']}": e['id'] for e in experiments} if experiments else {}
-    
-    # 获取原材料选项
-    raw_material_names = []
-    if raw_materials:
-        for m in raw_materials:
-            name = m['name']
-            extras = []
-            if m.get('abbreviation'):
-                extras.append(m['abbreviation'])
-            if m.get('manufacturer'):
-                extras.append(m['manufacturer'])
-            
-            if extras:
-                name += f" ({' | '.join(extras)})"
-            raw_material_names.append(name)
+    experiment_options = {f"{e['name']} (ID: {e['id']})": e['id'] for e in experiments} if experiments else {}
     
     # 添加新合成实验表单 - 使用唯一ID
     form_id = "syn_add"
@@ -974,8 +963,8 @@ def _render_synthesis_experiments_tab(data_manager):
                         "last_modified": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }
                     
-                    # 保存到数据管理器
-                    if data_manager.add_synthesis_record(new_record):
+                    # 保存到数据管理器 (通过 experiment_service 处理单位转换)
+                    if experiment_service.add_synthesis_record(new_record, input_unit="g"):
                         st.success(f"✅ 合成实验记录 '{formula_id}' 保存成功！")
                         
                         # 显示数据摘要
@@ -1023,7 +1012,7 @@ def _render_synthesis_experiments_tab(data_manager):
         with st.expander("高级筛选", expanded=False):
             f_col1, f_col2 = st.columns(2)
             with f_col1:
-                exp_id_options = ["全部"] + [f"{e.get('id')}: {e.get('name', '')}" for e in experiments]
+                exp_id_options = ["全部"] + [f"{e.get('name', '')} (ID: {e.get('id')})" for e in experiments]
                 exp_id_selected = st.selectbox("关联实验项目", options=exp_id_options, key="syn_filter_experiment")
             with f_col2:
                 date_range = st.date_input(
@@ -1060,7 +1049,12 @@ def _render_synthesis_experiments_tab(data_manager):
         exp_id_selected = st.session_state.get("syn_filter_experiment", "全部")
         if exp_id_selected != "全部":
             try:
-                exp_id_value = int(str(exp_id_selected).split(":", 1)[0].strip())
+                # 支持 "名称 (ID: id)" 格式
+                if " (ID: " in str(exp_id_selected):
+                    exp_id_value = int(str(exp_id_selected).split(" (ID: ")[1].split(")")[0])
+                else:
+                    # 兼容旧格式 "id: 名称"
+                    exp_id_value = int(str(exp_id_selected).split(":", 1)[0].strip())
             except Exception:
                 exp_id_value = None
             if exp_id_value is not None:
@@ -1205,7 +1199,7 @@ def _render_synthesis_experiments_tab(data_manager):
                         if exp_id_value is not None:
                             exp = next((e for e in experiments if e.get("id") == exp_id_value), None)
                             if exp:
-                                exp_name = f"{exp.get('id')}: {exp.get('name', '')}"
+                                exp_name = f"{exp.get('name', '')} (ID: {exp.get('id')})"
                             else:
                                 exp_name = str(exp_id_value)
                         st.write(exp_name)
@@ -1386,29 +1380,34 @@ def _render_synthesis_experiments_tab(data_manager):
         st.info("暂无合成实验数据，请添加第一条记录")
 
 # ==================== 成品减水剂模块函数 ====================
-def _render_products_tab(data_manager):
+def _render_products_tab(experiment_service, data_manager):
     """渲染成品减水剂标签页 - 增强版（带查找、编辑、固含计算）"""
     st.subheader("📊 成品减水剂管理")
     
     # 获取数据
     products = data_manager.get_all_products()
-    synthesis_records = data_manager.get_all_synthesis_records()
-    raw_materials = data_manager.get_all_raw_materials()
+    
+    # 使用 experiment_service 获取选项
+    raw_material_options = experiment_service.get_raw_material_options()
+    raw_material_map = {opt['label']: opt['data'] for opt in raw_material_options}
+    
+    synthesis_record_options = experiment_service.get_synthesis_record_options()
+    synthesis_record_map = {opt['label']: opt['data'] for opt in synthesis_record_options}
     
     # 使用标签页组织功能
     tab1, tab2, tab3 = st.tabs(["📝 新增成品", "🔍 查找与编辑", "📋 成品列表"])
     
     # ==================== 新增成品标签页 ====================
     with tab1:
-        _render_add_product_tab(data_manager, raw_materials, synthesis_records)
+        _render_add_product_tab(data_manager, raw_material_map, synthesis_record_map)
     
     # ==================== 查找与编辑标签页 ====================
     with tab2:
-        _render_search_edit_tab(data_manager, products, raw_materials, synthesis_records)
+        _render_search_edit_tab(data_manager, products, raw_material_map, synthesis_record_map)
     
     # ==================== 成品列表标签页 ====================
     with tab3:
-        _render_products_list_tab(data_manager, products, raw_materials)
+        _render_products_list_tab(data_manager, products, raw_material_map)
 
 def _calculate_theoretical_solid(ingredients, raw_materials_map):
     """计算理论固含"""
@@ -1434,29 +1433,19 @@ def _calculate_theoretical_solid(ingredients, raw_materials_map):
         return (total_solid_mass / total_mass) * 100.0
     return 0.0
 
-def _render_add_product_tab(data_manager, raw_materials, synthesis_records):
+def _render_add_product_tab(data_manager, raw_materials_map, synthesis_record_map):
     """渲染新增成品标签页"""
     st.markdown("### ➕ 新增成品减水剂")
+    
+    # 统一获取最新的原材料对象，确保数据一致性且修复潜在的 NameError
+    raw_materials = data_manager.get_all_raw_materials()
+    material_options = {f"{m.get('name', '未知')} (ID: {m.get('id', 'N/A')})": m for m in raw_materials if isinstance(m, dict)}
     
     # 初始化session state
     if "ingredient_rows" not in st.session_state:
         st.session_state.ingredient_rows = [{"name": "", "amount": 0.0}]
     
     # 原料选择下拉选项
-    material_options = {}
-    if raw_materials:
-        for m in raw_materials:
-            name = m['name']
-            extras = []
-            if m.get('abbreviation'):
-                extras.append(m['abbreviation'])
-            if m.get('manufacturer'):
-                extras.append(m['manufacturer'])
-            
-            if extras:
-                name += f" ({' | '.join(extras)})"
-            material_options[name] = m
-            
     material_names = list(material_options.keys())
     
     form_id = "product_add"
@@ -1479,7 +1468,7 @@ def _render_add_product_tab(data_manager, raw_materials, synthesis_records):
             )
             
             # 选择关联的合成实验
-            syn_options = ["无"] + [f"{r['formula_id']}" for r in synthesis_records]
+            syn_options = ["无"] + list(synthesis_record_map.keys())
             related_synthesis = st.selectbox(
                 "关联合成实验",
                 options=syn_options,
@@ -1879,7 +1868,7 @@ def _render_search_edit_tab(data_manager, products, raw_materials, synthesis_rec
     # 选择要编辑的产品
     st.markdown("### ✏️ 选择要编辑的成品")
     
-    product_options = {f"{p['product_name']} ({p['product_code']})": p['id'] for p in filtered_products}
+    product_options = {f"{p['product_name']} (ID: {p['id']}) ({p.get('product_code', '-')})": p['id'] for p in filtered_products}
     selected_product_key = st.selectbox(
         "选择成品",
         options=list(product_options.keys()),
@@ -1897,6 +1886,9 @@ def _render_edit_product_form(data_manager, product, raw_materials):
     """渲染编辑成品表单"""
     st.markdown(f"### ✏️ 编辑成品: {product['product_name']}")
     
+    # 获取最新的原材料对象列表，修复 string indices 错误
+    raw_materials = data_manager.get_all_raw_materials()
+    
     # 初始化原料行
     edit_rows_key = f"edit_ingredient_rows_{product['id']}"
     if edit_rows_key not in st.session_state:
@@ -1904,8 +1896,16 @@ def _render_edit_product_form(data_manager, product, raw_materials):
         st.session_state[edit_rows_key] = existing_ingredients if existing_ingredients else [{"name": "", "amount": 0.0}]
     
     # 原料选择下拉选项
-    material_options = {m['name']: m for m in raw_materials}
-    material_names = list(material_options.keys())
+    material_options = {}
+    material_names = []
+    if raw_materials:
+        for m in raw_materials:
+            # 确保 m 是对象/字典
+            if isinstance(m, dict):
+                # 标准化标签: 名称 (ID: id)
+                label = f"{m.get('name', '未知')} (ID: {m.get('id', 'N/A')})"
+                material_options[label] = m
+                material_names.append(label)
     
     form_id = f"edit_{product['id']}"
     with st.form(f"edit_product_form_{product['id']}_{form_id}", clear_on_submit=False):
@@ -2592,6 +2592,8 @@ def _render_recording_experiment_manager(title, type_key, records, update_record
     data_manager = getattr(update_record, "__self__", None)
     
     formula_options = sorted({str(r.get("formula_name", "")).strip() for r in normalized_records if str(r.get("formula_name", "")).strip()})
+    
+    # 确保选项中有 ID 信息 (用于过滤的一致性)
     formula_options = ["全部"] + formula_options
     
     default_start = (datetime.now() - timedelta(days=30)).date()
@@ -3160,17 +3162,23 @@ def _render_recording_experiment_manager(title, type_key, records, update_record
                     st.rerun()
 
 # ==================== 净浆实验模块函数 ====================
-def _render_paste_experiments_tab(data_manager):
+def _render_paste_experiments_tab(experiment_service, data_manager):
     """渲染净浆实验标签页"""
     st.subheader("🧫 净浆实验记录")
     
     # 获取数据
     synthesis_records = data_manager.get_all_synthesis_records()
     products = data_manager.get_all_products()
-    # 获取所有母液
-    mother_liquors = []
-    if hasattr(data_manager, 'get_all_mother_liquors'):
-        mother_liquors = data_manager.get_all_mother_liquors()
+    
+    # 使用 experiment_service 获取选项
+    ml_options = experiment_service.get_mother_liquor_options()
+    ml_map = {opt['label']: opt['data'] for opt in ml_options}
+    
+    syn_options = experiment_service.get_synthesis_record_options()
+    syn_map = {opt['label']: opt['data'] for opt in syn_options}
+    
+    prod_options = experiment_service.get_product_options()
+    prod_map = {opt['label']: opt['data'] for opt in prod_options}
     
     # 获取历史净浆实验数据（用于导入标准样品数据）
     paste_experiments = []
@@ -3181,31 +3189,16 @@ def _render_paste_experiments_tab(data_manager):
     paste_formula_options = []
     
     # 1. 母液选项
-    if mother_liquors:
-        for ml in mother_liquors:
-            label = ml['name']
-            source = ml.get('source_type', '')
-            if source == 'production':
-                batch = ml.get('batch_number', '')
-                if batch:
-                    label += f" (批号:{batch})"
-            # Include ID for robust matching
-            paste_formula_options.append(f"母液: {label} (ID:{ml['id']})")
+    for label in ml_map.keys():
+        paste_formula_options.append(f"母液: {label}")
 
-    # 2. 合成实验选项 (保留以兼容旧数据，或者如果用户仍想直接关联合成记录)
-    if synthesis_records:
-        paste_formula_options.extend([
-            f"合成实验: {r['formula_id']}" for r in synthesis_records
-        ])
+    # 2. 合成实验选项
+    for label in syn_map.keys():
+        paste_formula_options.append(f"合成实验: {label}")
     
     # 3. 成品选项
-    if products:
-        for p in products:
-            label = p['product_name']
-            batch = p.get('batch_number', '')
-            if batch:
-                label += f" (批号:{batch})"
-            paste_formula_options.append(f"成品: {label}")
+    for label in prod_map.keys():
+        paste_formula_options.append(f"成品: {label}")
     
     if "paste_form_id" not in st.session_state:
         st.session_state.paste_form_id = str(uuid.uuid4())[:8]
@@ -3244,9 +3237,13 @@ def _render_paste_experiments_tab(data_manager):
         if hasattr(data_manager, 'get_all_experiments'):
             all_experiments = data_manager.get_all_experiments()
         
-        exp_options = ["无"] + [f"{exp['name']} - {exp.get('description', '')}" for exp in all_experiments]
+        # 标准化标签
+        exp_opt_list = ["无"]
+        for exp in all_experiments:
+            exp_opt_list.append(f"{exp['name']} (ID: {exp['id']})")
+        
         related_experiment_str = st.selectbox("关联实验",
-                                            options=exp_options,
+                                            options=exp_opt_list,
                                             key=f"paste_related_exp_{form_id}")
     
     # 第三排：水胶比 和 用水量
@@ -3281,7 +3278,7 @@ def _render_paste_experiments_tab(data_manager):
                                           step=0.01,
                                           key=f"paste_dosage_{form_id}")
     
-    # 🧪 匀质性检测 (仅当选择了母液时显示更有意义，但Form内无法动态隐藏，除非用rerun，这里常驻显示)
+    # 🧪 匀质性检测
     st.markdown("### 🧪 匀质性检测")
     st.caption("填写此部分将自动更新关联母液的属性")
     ml_prop_col1, ml_prop_col2, ml_prop_col3 = st.columns(3)
@@ -3299,81 +3296,41 @@ def _render_paste_experiments_tab(data_manager):
         
         # 如果是生产检测，处理标准样品选择
         if experiment_purpose == "生产检测":
-            # 选择标准样品（来自母液管理）
-            std_sample_list = ["自定义/无"]
-            if mother_liquors:
-                for ml in mother_liquors:
-                    label = ml['name']
-                    source = ml.get('source_type', '')
-                    if source == 'production':
-                        batch = ml.get('batch_number', '')
-                        if batch:
-                            label += f" (批号:{batch})"
-                    std_sample_list.append(f"{label}")
+            # 选择标准样品 (仅限大生产母液)
+            std_options = ["自定义/无"]
+            std_map = {}
+            for opt in ml_options:
+                if opt['data'].get('source_type') == 'production':
+                    std_options.append(opt['label'])
+                    std_map[opt['label']] = opt['data']
             
-            std_sample_str = st.selectbox("选择标准样品 (来自母液管理)", std_sample_list, key=f"paste_std_sample_select_{form_id}")
+            std_sample_str = st.selectbox("选择标准样品 (来自母液管理)", std_options, key=f"paste_std_sample_select_{form_id}")
             
             if std_sample_str != "自定义/无":
-                # 根据名称查找 ID (因为去掉了 ID 显示，需要反查)
-                selected_std_id = None
-                for ml in mother_liquors:
-                     # 重建 label 逻辑来匹配
-                    label = ml['name']
-                    source = ml.get('source_type', '')
-                    if source == 'production':
-                        batch = ml.get('batch_number', '')
-                        if batch:
-                            label += f" (批号:{batch})"
-                    
-                    if label == std_sample_str:
-                        selected_std_id = ml['id']
-                        break
-                
-                if selected_std_id:
+                selected_std = std_map.get(std_sample_str)
+                if selected_std:
+                    selected_std_id = selected_std['id']
                     # 查找最近一次使用该母液的净浆实验数据
-                    relevant_exps = []
-                    for e in paste_experiments:
-                         # 这里原来的逻辑是匹配 ID，现在 formula_name 可能也没有 ID 了
-                         # 但如果 formula_name 之前存的是带 ID 的字符串，我们需要兼容
-                         # 或者如果新存的 formula_name 只有 label，我们需要按 label 匹配
-                         
-                         # 情况1: 旧数据带 ID "(ID:123)"
-                         # 情况2: 新数据只有 label
-                         
-                         e_formula = e.get("formula_name", "")
-                         if not e_formula: continue
-                         
-                         # 尝试从 e_formula 提取 ID 匹配
-                         import re
-                         match = re.search(r"\(ID:(\d+)\)", e_formula)
-                         if match:
-                             if int(match.group(1)) == int(selected_std_id):
-                                 relevant_exps.append(e)
-                         else:
-                             # 尝试按名称匹配 (去掉前缀 "母液: ")
-                             clean_name = e_formula.replace("母液: ", "").strip()
-                             if clean_name == std_sample_str:
-                                 relevant_exps.append(e)
-
+                    relevant_exps = [
+                        e for e in paste_experiments 
+                        if f"(ID: {selected_std_id})" in e.get("formula_name", "")
+                    ]
+                    
                     if relevant_exps:
                         # 按日期降序排序
                         relevant_exps.sort(key=lambda x: x.get("test_date", ""), reverse=True)
                         latest = relevant_exps[0]
-                        perf = latest.get("performance", {}) 
-                        if not perf and "performance_data" in latest:
-                            perf = latest["performance_data"]
+                        perf = latest.get("performance", {}) or latest.get("performance_data", {})
                         
                         if perf:
-                            # 传递所有历史数据，让 Widget 决定如何解析
                             std_defaults = perf
                             st.info(f"已自动加载标准样品 ({std_sample_str}) 最近一次实验数据 ({latest.get('test_date')})")
                             
-                            # 检查是否需要重新加载（避免覆盖用户的手动修改）
+                            # 检查是否需要重新加载
                             last_loaded_key = f"paste_last_std_{form_id}"
                             if st.session_state.get(last_loaded_key) != selected_std_id:
                                 fluidity_widget.load_defaults(std_defaults)
-                                st.session_state.last_loaded_key = selected_std_id
-                                
+                                st.session_state[last_loaded_key] = selected_std_id
                         else:
                             st.caption("未找到该标准样品的历史流动度数据")
                     else:
@@ -3417,8 +3374,8 @@ def _render_paste_experiments_tab(data_manager):
                     "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
                 
-                # 1. 保存净浆实验
-                if data_manager.add_paste_experiment(experiment_data):
+                # 1. 保存净浆实验 (通过 experiment_service 处理单位转换)
+                if experiment_service.add_paste_experiment(experiment_data, input_unit="g"):
                     st.success("净浆实验数据保存成功！")
                     
                     # Reset form ID to clear inputs
@@ -3492,32 +3449,30 @@ def _render_paste_experiments_tab(data_manager):
     )
 
 # ==================== 砂浆实验模块函数 ====================
-def _render_mortar_experiments_tab(data_manager):
+def _render_mortar_experiments_tab(experiment_service, data_manager):
     """渲染砂浆实验标签页"""
     st.subheader("🏗️ 砂浆实验记录")
     
-    synthesis_records = data_manager.get_all_synthesis_records()
-    products = data_manager.get_all_products()
-    mother_liquors = data_manager.get_all_mother_liquors()
-    raw_materials = data_manager.get_all_raw_materials()
+    # 获取选项
+    ml_options = experiment_service.get_mother_liquor_options()
+    ml_map = {opt['label']: opt['data'] for opt in ml_options}
+    
+    syn_options = experiment_service.get_synthesis_record_options()
+    syn_map = {opt['label']: opt['data'] for opt in syn_options}
+    
+    prod_options = experiment_service.get_product_options()
+    prod_map = {opt['label']: opt['data'] for opt in prod_options}
+    
+    # 获取原始材料选项用于组分选择
+    raw_material_options = experiment_service.get_raw_material_options()
     
     mortar_formula_options = []
-    if synthesis_records:
-        mortar_formula_options.extend([f"合成实验: {r['formula_id']}" for r in synthesis_records])
-    if products:
-        for p in products:
-            label = p['product_name']
-            batch = p.get('batch_number', '')
-            if batch:
-                label += f" (批号:{batch})"
-            mortar_formula_options.append(f"成品: {label}")
-    if mother_liquors:
-        for m in mother_liquors:
-            label = m.get('mother_liquor_name', '未命名')
-            batch = m.get('batch_number', '')
-            if batch:
-                label += f" (批号:{batch})"
-            mortar_formula_options.append(f"母液: {label}")
+    for label in ml_map.keys():
+        mortar_formula_options.append(f"母液: {label}")
+    for label in syn_map.keys():
+        mortar_formula_options.append(f"合成实验: {label}")
+    for label in prod_map.keys():
+        mortar_formula_options.append(f"成品: {label}")
     
     if "mortar_form_id" not in st.session_state:
         st.session_state.mortar_form_id = str(uuid.uuid4())[:8]
@@ -3753,8 +3708,8 @@ def _render_mortar_experiments_tab(data_manager):
             
         # 准备选项列表
         comp_options = ["请选择..."]
-        comp_options.extend([f"母液: {ml['name']}" for ml in mother_liquors])
-        comp_options.extend([f"原料: {rm['name']}" for rm in raw_materials])
+        comp_options.extend([f"母液: {opt['label']}" for opt in ml_options])
+        comp_options.extend([f"原料: {opt['label']}" for opt in raw_material_options])
             
         # --- 3. 配方组分定义 (列式布局) ---
         if st.session_state[recipes_key]:
@@ -4105,7 +4060,8 @@ def _render_mortar_experiments_tab(data_manager):
                     "operator": st.session_state.get("username", "Unknown")
                 }
                 
-                if data_manager.add_mortar_experiment(experiment_data):
+                # 保存到数据管理器 (通过 experiment_service 处理单位转换)
+                if experiment_service.add_mortar_experiment(experiment_data, input_unit="g"):
                     st.success("砂浆实验数据保存成功！")
                     
                     # 清理表单状态
@@ -4160,35 +4116,30 @@ def _render_mortar_experiments_tab(data_manager):
     )
 
 # ==================== 混凝土实验模块函数 ====================
-def _render_concrete_experiments_tab(data_manager):
+def _render_concrete_experiments_tab(experiment_service, data_manager):
     """渲染混凝土实验标签页"""
     
-    # 获取数据
-    synthesis_records = data_manager.get_all_synthesis_records()
-    products = data_manager.get_all_products()
-    mother_liquors = data_manager.get_all_mother_liquors()
-    raw_materials = data_manager.get_all_raw_materials()
+    # 获取选项
+    ml_options = experiment_service.get_mother_liquor_options()
+    ml_map = {opt['label']: opt['data'] for opt in ml_options}
+    
+    syn_options = experiment_service.get_synthesis_record_options()
+    syn_map = {opt['label']: opt['data'] for opt in syn_options}
+    
+    prod_options = experiment_service.get_product_options()
+    prod_map = {opt['label']: opt['data'] for opt in prod_options}
+    
+    # 获取原始材料选项用于组分选择
+    raw_material_options = experiment_service.get_raw_material_options()
     
     # 获取可关联的配方选项
     concrete_formula_options = []
-    if synthesis_records:
-        concrete_formula_options.extend([
-            f"合成实验: {r['formula_id']}" for r in synthesis_records
-        ])
-    if products:
-        for p in products:
-            label = p['product_name']
-            batch = p.get('batch_number', '')
-            if batch:
-                label += f" (批号:{batch})"
-            concrete_formula_options.append(f"成品: {label}")
-    if mother_liquors:
-        for m in mother_liquors:
-            label = m.get('mother_liquor_name', '未命名')
-            batch = m.get('batch_number', '')
-            if batch:
-                label += f" (批号:{batch})"
-            concrete_formula_options.append(f"母液: {label}")
+    for label in ml_map.keys():
+        concrete_formula_options.append(f"母液: {label}")
+    for label in syn_map.keys():
+        concrete_formula_options.append(f"合成实验: {label}")
+    for label in prod_map.keys():
+        concrete_formula_options.append(f"成品: {label}")
     
     if "concrete_form_id" not in st.session_state:
         st.session_state.concrete_form_id = str(uuid.uuid4())[:8]
@@ -4466,8 +4417,8 @@ def _render_concrete_experiments_tab(data_manager):
                 
             # 准备选项列表
             comp_options = ["请选择..."]
-            comp_options.extend([f"母液: {ml['name']}" for ml in mother_liquors])
-            comp_options.extend([f"原料: {rm['name']}" for rm in raw_materials])
+            comp_options.extend([f"母液: {opt['label']}" for opt in ml_options])
+            comp_options.extend([f"原料: {opt['label']}" for opt in raw_material_options])
             
             # --- 3. 配方组分 (列式布局) ---
             if st.session_state[recipes_key]:
@@ -4750,7 +4701,8 @@ def _render_concrete_experiments_tab(data_manager):
                         "operator": st.session_state.get("username", "Unknown")
                     }
                     
-                    if data_manager.add_concrete_experiment(experiment_data):
+                    # 保存到数据管理器 (通过 experiment_service 处理单位转换)
+                    if experiment_service.add_concrete_experiment(experiment_data, input_unit="kg"):
                         st.success("混凝土实验数据保存成功！")
                         # 清除状态
                         st.session_state.concrete_form_id = str(uuid.uuid4())[:8]

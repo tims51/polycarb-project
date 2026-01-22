@@ -7,7 +7,7 @@ import io
 from utils.unit_helper import convert_quantity, normalize_unit
 from components.ui_manager import UIManager
 
-def _render_batch_import(data_manager):
+def _render_batch_import(inventory_service, data_manager):
     st.markdown("### 📂 批量导入原材料")
     st.info("请下载模板，按照格式填写后上传。支持 Excel 文件 (.xlsx, .xls)")
     
@@ -131,7 +131,7 @@ def _render_batch_import(data_manager):
                             "created_date": datetime.now().strftime("%Y-%m-%d")
                         }
                         
-                        success, msg = data_manager.add_raw_material(new_material)
+                        success, msg = inventory_service.add_raw_material(new_material)
                         if success:
                             success_count += 1
                         else:
@@ -158,7 +158,7 @@ def _render_batch_import(data_manager):
         except Exception as e:
             st.error(f"文件读取失败: {e}")
 
-def _render_stocktake_section(data_manager):
+def _render_stocktake_section(inventory_service, data_manager):
     with st.expander("🔄 库存初始化 / 盘点 (Stocktake)", expanded=False):
         st.warning("⚠️ **注意**：本模块仅用于修正**当前时刻**的库存。")
         st.info("👉 **如需指定日期进行库存初始化或盘点（支持快照回溯与吨位录入），请前往左侧菜单的【数据管理】->【库存盘点】页面操作。**")
@@ -230,7 +230,7 @@ def _render_stocktake_section(data_manager):
                         }
                         
                         # add_inventory_record handles master stock update
-                        success, msg = data_manager.add_inventory_record(record_data)
+                        success, msg = inventory_service.add_inventory_record(record_data)
                         if success:
                             count += 1
                             status.write(f"✅ {row['名称']}: {current:.4f} -> {actual:.4f} ({unit})")
@@ -244,7 +244,7 @@ def _render_stocktake_section(data_manager):
             elif count == 0:
                 st.info("没有检测到库存变更。")
 
-def _render_history_restore_section(data_manager):
+def _render_history_restore_section(inventory_service, data_manager):
     with st.expander("⏳ 历史库存回溯 (Restore History)", expanded=False):
         st.info("此功能可将所有原材料的库存**回滚**到指定日期的结束状态。系统将通过计算当前库存与该日期之后的流水差异，生成修正记录。")
         
@@ -253,7 +253,7 @@ def _render_history_restore_section(data_manager):
         
         if st.button("🔍 预览回溯结果", key="btn_preview_restore"):
             materials = data_manager.get_all_raw_materials()
-            records = data_manager.get_inventory_records()
+            records = inventory_service.get_inventory_records()
             
             # Filter records that happened AFTER the target date
             # These are the records we need to "reverse" to get back to the state at target_date
@@ -361,7 +361,7 @@ def _render_history_restore_section(data_manager):
                             "date": datetime.now().strftime("%Y-%m-%d")
                         }
                         
-                        success, msg = data_manager.add_inventory_record(record_data)
+                        success, msg = inventory_service.add_inventory_record(record_data)
                         if success:
                             count += 1
                             status.write(f"✅ {item['name']}: 已调整")
@@ -433,7 +433,8 @@ def render_raw_material_management(inventory_service, data_manager):
                         initial_stock = st.number_input("初始库存", min_value=0.0, step=0.00001, format="%.5f", key=f"raw_init_stock_{form_id}")
                 
                 with col_inv2:
-                    stock_unit = st.text_input("单位 (e.g., kg, ton)", value="ton", key=f"raw_unit_{form_id}")
+                    # 默认使用吨，方便录入，后台自动转kg
+                    stock_unit = st.selectbox("单位", ["ton", "kg"], index=0, key=f"raw_unit_{form_id}")
 
                 main_usage = st.text_area("详细用途描述", height=60, key=f"raw_main_usage_{form_id}")
                 
@@ -472,16 +473,12 @@ def render_raw_material_management(inventory_service, data_manager):
                                     "usage_category": ",".join(usage_categories),
                                     "main_usage": main_usage,
                                     "stock_quantity": initial_stock,
-                                    "unit": stock_unit,
+                                    "unit": stock_unit, # Service will convert to kg
                                     "created_date": datetime.now().strftime("%Y-%m-%d")
                                 }
-                                success, msg = data_manager.add_raw_material(new_material)
+                                # 使用 inventory_service 添加，确保单位转换逻辑一致
+                                success, msg = inventory_service.add_raw_material(new_material)
                                 if success:
-                                    # If initial stock > 0, add an inventory record too
-                                    if initial_stock > 0:
-                                        # We need the ID of the newly added material. 
-                                        pass
-                                    
                                     st.success(f"原材料 '{material_name}' 添加成功！")
                                     time.sleep(0.5)
                                     st.rerun()
@@ -491,12 +488,12 @@ def render_raw_material_management(inventory_service, data_manager):
                         st.error("请填写带*的必填项 (名称、物料号、用途)")
         
         with tab_batch:
-            _render_batch_import(data_manager)
+            _render_batch_import(inventory_service, data_manager)
     
-    _render_stocktake_section(data_manager)
+    _render_stocktake_section(inventory_service, data_manager)
     
     # 插入历史回溯功能
-    _render_history_restore_section(data_manager)
+    _render_history_restore_section(inventory_service, data_manager)
     
     # 库存操作区域
     with st.expander("🏭 库存操作 (入库/出库)", expanded=False):
@@ -506,21 +503,11 @@ def render_raw_material_management(inventory_service, data_manager):
             with st.form("inventory_op_form", clear_on_submit=True):
                 op_col1, op_col2, op_col3 = st.columns([2, 1, 1])
                 
-                # 预先获取选中的原材料ID (为了获取单位)
-                # 由于是在 form 内部，我们只能获取当前的 selection，
-                # 但 st.selectbox 在 form 提交前不会更新 session_state 中的值给 Python 变量
-                # 除非我们把它放在 form 外面。
-                # 为了简化，我们在提交时处理单位。
-                # 但为了显示正确的单位选项，我们需要 access 到当前的 mat options。
-                
-                mat_options = {f"{m['name']} ({m.get('material_number', '-')})": m['id'] for m in raw_materials}
+                # 下拉框标准化: 名称 (ID: {id})
+                mat_options = {f"{m['name']} (ID: {m['id']})": m['id'] for m in raw_materials}
                 
                 with op_col1:
                     selected_mat_label = st.selectbox("选择原材料*", list(mat_options.keys()))
-                
-                # 尝试解析当前选中的原材料 (注意：在 form 未提交时，这里可能拿不到最新选择，
-                # 但通常 streamlit 会重跑脚本，如果是用户交互触发的)
-                # 这是一个局限性。为了更好的体验，我们将单位选择做得通用一些。
                 
                 with op_col2:
                     c2_1, c2_2 = st.columns(2)
@@ -528,8 +515,8 @@ def render_raw_material_management(inventory_service, data_manager):
                         op_type = st.selectbox("操作类型*", ["入库", "出库"])
                     with c2_2:
                         # 提供常用单位
-                        common_units = ["kg", "ton", "g", "L", "mL", "吨", "公斤", "克"]
-                        op_unit = st.selectbox("单位", common_units, index=0) # 默认 kg
+                        common_units = ["ton", "kg", "g", "L", "mL", "吨", "公斤", "克"]
+                        op_unit = st.selectbox("单位", common_units, index=0) # 默认 ton
                     
                 with op_col3:
                     op_qty = st.number_input("数量*", min_value=0.0, step=0.00001, format="%.5f")
@@ -545,37 +532,23 @@ def render_raw_material_management(inventory_service, data_manager):
                         stock_unit = selected_material.get('unit', 'kg') if selected_material else 'kg'
                         
                         if op_qty > 0:
-                            # 单位转换
-                            # 核心逻辑：
-                            # 1. 界面输入 op_qty 和 op_unit
-                            # 2. 获取原材料库存主单位 stock_unit
-                            # 3. 将 op_qty 转换为 stock_unit 单位下的 final_qty
-                            # 4. data_manager.add_inventory_record 接收 final_qty，
-                            #    它会直接将此值加减到原材料的 stock_quantity 上（假设该字段单位即为 stock_unit）。
-                            
-                            final_qty, success = convert_quantity(op_qty, op_unit, stock_unit)
-                            
-                            conversion_note = ""
-                            if success and normalize_unit(op_unit) != normalize_unit(stock_unit):
-                                conversion_note = f" (转换: {op_qty}{op_unit} -> {final_qty:g}{stock_unit})"
-                                UIManager.toast(f"单位已自动转换: {op_qty} {op_unit} = {final_qty:g} {stock_unit}", type="info")
-                            elif not success and normalize_unit(op_unit) != normalize_unit(stock_unit):
-                                UIManager.toast(f"⚠️ 无法从 {op_unit} 转换为 {stock_unit}，将按 1:1 处理。请检查单位是否正确。", type="warning")
-                                final_qty = op_qty
-                                conversion_note = f" (单位不匹配: {op_unit} vs {stock_unit})"
+                            # 统一使用 inventory_service.add_inventory_record
+                            # 该方法会自动将 input_unit 转换为 kg
                             
                             record_data = {
                                 "material_id": selected_mat_id,
                                 "type": "in" if op_type == "入库" else "out",
-                                "quantity": final_qty, # 这里传递的是转换后的数量 (主单位)
-                                "reason": f"{op_reason} [原始: {op_qty}{op_unit}]{conversion_note}",
+                                "quantity": op_qty, 
+                                "reason": op_reason,
                                 "operator": "User", 
                                 "date": datetime.now().strftime("%Y-%m-%d")
                             }
-                            success, msg = data_manager.add_inventory_record(record_data)
+                            # 传递 input_unit 给 service 进行转换
+                            success, msg = inventory_service.add_inventory_record(record_data, input_unit=op_unit)
+                            
                             if success:
                                 UIManager.toast(msg, type="success")
-                                time.sleep(1.5) # 增加延迟以便用户看到转换信息
+                                time.sleep(1.5) 
                                 st.rerun()
                             else:
                                 UIManager.toast(msg, type="error")
@@ -596,7 +569,7 @@ def render_raw_material_management(inventory_service, data_manager):
             with col_desc:
                 st.info(f"系统将计算 {benchmark_date} 之前的累计库存作为**期初库存**，并核算该日期之后的流水变动。")
 
-            records = data_manager.get_inventory_records()
+            records = inventory_service.get_inventory_records()
             rows = []
             
             # 定义类型分类
@@ -621,49 +594,51 @@ def render_raw_material_management(inventory_service, data_manager):
             for m in raw_materials:
                 mid = m.get("id")
                 name = m.get("name", "")
+                mat_num = m.get("material_number", "-")
                 cur_qty = float(m.get("stock_quantity", 0.0) or 0.0)
                 unit = str(m.get("unit", "kg") or "kg")
                 
-                # 分段累计
-                stock_opening = 0.0 # 期初 ( < bench_str )
-                period_in = 0.0     # 期间采购 ( >= bench_str )
-                period_consume = 0.0 # 期间消耗 ( >= bench_str )
-                period_adjust = 0.0 # 期间调整 ( >= bench_str )
-                
-                # 详情记录
+                # [修复] 预先初始化所有统计变量为 0.0，防止 NameError
+                stock_opening = 0.0
+                period_in = 0.0
+                period_consume = 0.0
+                period_adjust = 0.0
                 period_logs = []
                 
-                for r in records:
-                    if r.get("material_id") != mid:
-                        continue
-                        
-                    qty = float(r.get("quantity", 0.0) or 0.0)
-                    rtype = r.get("type", "")
-                    r_date = r.get("date", "")
-                    
-                    # 判断时间段
-                    is_period = r_date >= bench_str
-                    
-                    if not is_period:
-                        # 期初计算 (所有类型的净值)
-                        if rtype in initial_types + adjust_in_types:
-                            stock_opening += qty
-                        elif rtype in consume_types + adjust_out_types:
-                            stock_opening -= qty
-                    else:
-                        # 期间计算 (分类统计)
-                        if rtype in initial_types:
-                            period_in += qty
-                            period_logs.append({"date": r_date, "type": "采购/入库", "qty": qty, "impact": qty})
-                        elif rtype in consume_types:
-                            period_consume += qty
-                            period_logs.append({"date": r_date, "type": "生产消耗", "qty": qty, "impact": -qty})
-                        elif rtype in adjust_in_types:
-                            period_adjust += qty
-                            period_logs.append({"date": r_date, "type": "调整入库", "qty": qty, "impact": qty})
-                        elif rtype in adjust_out_types:
-                            period_adjust -= qty
-                            period_logs.append({"date": r_date, "type": "调整出库", "qty": qty, "impact": -qty})
+                if records:
+                    for r in records:
+                        if r.get("material_id") == mid:
+                            qty = float(r.get("quantity", 0.0) or 0.0)
+                            # 提取日期 (YYYY-MM-DD)
+                            r_date = str(r.get("date", ""))[:10]
+                            r_type = r.get("type", "")
+                            
+                            # 计算对库存的影响值
+                            impact = 0.0
+                            if r_type in initial_types or r_type in adjust_in_types:
+                                impact = qty
+                            elif r_type in consume_types or r_type in adjust_out_types:
+                                impact = -qty
+                                
+                            if r_date < bench_str:
+                                # 基准日之前的流水累计为期初库存
+                                stock_opening += impact
+                            else:
+                                # 基准日及之后的流水记录为期间变动
+                                if r_type in initial_types:
+                                    period_in += qty
+                                elif r_type in consume_types:
+                                    period_consume += qty
+                                elif r_type in adjust_in_types:
+                                    period_adjust += qty
+                                elif r_type in adjust_out_types:
+                                    period_adjust -= qty
+                                
+                                period_logs.append({
+                                    "date": r.get("date", ""),
+                                    "type": r_type,
+                                    "impact": impact
+                                })
                 
                 # 理论库存 = 期初 + 期间采购 - 期间消耗 + 期间调整
                 calculated_stock = stock_opening + period_in - period_consume + period_adjust
@@ -688,14 +663,15 @@ def render_raw_material_management(inventory_service, data_manager):
                     "单位": "吨"
                 })
                 
-                # 记录详情数据 (注意：详情数据使用原始单位，展示时需转换或说明)
-                # 为简化，这里我们在详情里直接展示吨 (如果单位不是吨，可能需要逐行转换，比较麻烦，暂展示原始单位或尽量转)
-                # 实际上 detail_data_map 最好存储原始值，展示时转换
-                detail_data_map[name] = {
+                # 记录详情数据
+                detail_label = f"{name} ({mat_num} / ID: {mid})"
+                detail_data_map[detail_label] = {
                     "opening": stock_opening,
                     "logs": sorted(period_logs, key=lambda x: x["date"]),
                     "final": calculated_stock,
-                    "unit": unit
+                    "unit": unit,
+                    "name": name,
+                    "mid": mid
                 }
                 
                 # 记录校准候选 (绝对差额 > 0.0001吨)
@@ -704,6 +680,7 @@ def render_raw_material_management(inventory_service, data_manager):
                     calibration_candidates.append({
                         "id": mid,
                         "name": name,
+                        "mat_num": mat_num,
                         "calculated_stock": calculated_stock, # 原始单位
                         "diff_disp": round(diff_ton, 4)
                     })
@@ -723,6 +700,8 @@ def render_raw_material_management(inventory_service, data_manager):
                         d_unit = det["unit"]
                         
                         st.write(f"**{sel_detail} 计算过程 (基准日: {bench_str})** - 原始单位: {d_unit}")
+                        
+                        # ... (rest of the logic remains same)
                         
                         detail_rows = []
                         run_bal = det["opening"]
@@ -1139,9 +1118,6 @@ def render_raw_material_management(inventory_service, data_manager):
                                         st.error(f"原材料 '{e_name.strip()}' (供应商: {e_supplier.strip()}) 已存在！")
                                     else:
                                         target_unit = e_unit.strip() or base_unit
-                                        stock_base, stock_ok = convert_quantity(float(e_stock_ton), "ton", target_unit)
-                                        if not stock_ok:
-                                            stock_base = float(e_stock_ton)
                                         updated_fields = {
                                             "name": e_name.strip(),
                                             "material_number": e_material_number.strip(),
@@ -1155,12 +1131,13 @@ def render_raw_material_management(inventory_service, data_manager):
                                             "supplier": e_supplier.strip(),
                                             "supplier_rating": e_rating,
                                             "qc_status": e_qc,
-                                            "stock_quantity": stock_base,
-                                            "unit": target_unit,
+                                            "stock_quantity": float(e_stock_ton),
+                                            "unit": "ton", # Service will convert to kg
                                             "usage_category": ",".join(e_usage_categories),
                                             "main_usage": e_usage.strip(),
                                         }
-                                        success, msg = data_manager.update_raw_material(edit_id, updated_fields)
+                                        # 使用 inventory_service 更新，确保单位转换逻辑一致
+                                        success, msg = inventory_service.update_raw_material(edit_id, updated_fields)
                                         if success:
                                             st.success("保存成功")
                                             st.session_state.raw_material_edit_id = None

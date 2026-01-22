@@ -1718,7 +1718,7 @@ class DataService:
                 target_idx = i
                 break
         
-        DEFAULT_UNIT = "吨"
+        DEFAULT_UNIT = "kg"
         
         if not target_item:
             # 新增产品

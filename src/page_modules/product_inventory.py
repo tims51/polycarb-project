@@ -48,13 +48,13 @@ def render_product_inventory_page(service: InventoryService):
             if "stock_quantity" not in df_inv.columns and "current_stock" in df_inv.columns:
                 df_inv["stock_quantity"] = df_inv["current_stock"]
             
-            # 确保数字列为 float
-            df_inv["stock_quantity"] = pd.to_numeric(df_inv["stock_quantity"], errors='coerce').fillna(0.0)
+            # 确保数字列为 float 并转换为吨 (数据库存的是 kg)
+            df_inv["stock_quantity"] = pd.to_numeric(df_inv["stock_quantity"], errors='coerce').fillna(0.0) / 1000.0
             
             # 聚合：按产品名称汇总库存，确保同名项合并
             df_chart = df_inv.groupby("product_name", as_index=False)["stock_quantity"].sum()
-            # 过滤：只显示有库存的产品 (> 0.001 吨)
-            df_chart = df_chart[df_chart["stock_quantity"] > 0.001]
+            # 过滤：只显示有库存的产品 (> 0.0001 吨)
+            df_chart = df_chart[df_chart["stock_quantity"] > 0.0001]
             
             if not df_chart.empty:
                 c1, c2 = st.columns(2)
@@ -142,25 +142,25 @@ def render_product_inventory_page(service: InventoryService):
         op_type = st.radio("选择操作类型", ["生产入库", "销售出库", "库存校准"], horizontal=True)
         
         products = service.get_products()
-        prod_names = [p["product_name"] for p in products] if products else []
+        # 遵循 AI_RULES: 下拉框必须包含 ID 或 编码
+        prod_options = {f"{p['product_name']} (ID: {p['id']})": p for p in products} if products else {}
+        prod_display_names = list(prod_options.keys())
         
         if op_type == "生产入库":
             st.markdown("#### 🏭 生产入库登记")
             with st.form("inbound_form", clear_on_submit=True):
                 col1, col2 = st.columns(2)
                 with col1:
-                    # 这里如果是真实场景，应该从生产订单中选择
-                    p_name = st.selectbox("入库产品", prod_names + ["(新产品)"])
-                    if p_name == "(新产品)":
+                    p_label = st.selectbox("入库产品", prod_display_names + ["(新产品)"])
+                    if p_label == "(新产品)":
                         new_name = st.text_input("输入新产品名称")
                         p_type = st.selectbox("产品类型", ["母液", "速凝剂", "复配", "其他"])
                         final_p_name = new_name
                     else:
-                        # 查找类型
-                        curr_p = next((p for p in products if p["product_name"] == p_name), {})
-                        p_type = curr_p.get("type", "其他")
+                        selected_p = prod_options[p_label]
+                        p_type = selected_p.get("type", "其他")
                         st.info(f"类型: {p_type}")
-                        final_p_name = p_name
+                        final_p_name = selected_p["product_name"]
                         
                 with col2:
                     qty = st.number_input("入库数量 (吨)", min_value=0.00001, step=0.00001, format="%.5f")
@@ -191,14 +191,14 @@ def render_product_inventory_page(service: InventoryService):
             with st.form("outbound_form", clear_on_submit=True):
                 col1, col2 = st.columns(2)
                 with col1:
-                    p_name = st.selectbox("出库产品", prod_names)
-                    # 显示当前库存
-                    curr_p = next((p for p in products if p["product_name"] == p_name), None)
-                    curr_stock = float(curr_p.get("current_stock", 0)) if curr_p else 0
-                    st.caption(f"当前库存: {curr_stock} 吨")
+                    p_label = st.selectbox("出库产品", prod_display_names)
+                    selected_p = prod_options[p_label]
+                    curr_stock_kg = float(selected_p.get("stock_quantity", 0))
+                    curr_stock_tons = curr_stock_kg / 1000.0
+                    st.caption(f"当前库存: {curr_stock_tons:.3f} 吨")
                     
                 with col2:
-                    qty = st.number_input("出库数量 (吨)", min_value=0.00001, max_value=curr_stock, step=0.00001, format="%.5f")
+                    qty = st.number_input("出库数量 (吨)", min_value=0.00001, max_value=max(0.00001, curr_stock_tons), step=0.00001, format="%.5f")
                     customer = st.text_input("客户名称")
                 
                 remark = st.text_input("备注 (订单号/物流单号)")
@@ -211,7 +211,7 @@ def render_product_inventory_page(service: InventoryService):
                     else:
                         with UIManager.with_spinner("正在处理出库..."):
                             success, msg = service.process_outbound(
-                                p_name, qty, customer, remark,
+                                selected_p["product_name"], qty, customer, remark,
                                 operator=st.session_state.get("username", "Admin"),
                                 date_str=op_date.strftime("%Y-%m-%d")
                             )
@@ -226,14 +226,15 @@ def render_product_inventory_page(service: InventoryService):
             
             col1, col2 = st.columns(2)
             with col1:
-                p_name = st.selectbox("校准产品", prod_names, key="cal_prod")
-                curr_p = next((p for p in products if p["product_name"] == p_name), None)
-                sys_stock = float(curr_p.get("current_stock", 0)) if curr_p else 0
-                st.metric("系统账面库存", f"{sys_stock:.5f} 吨")
+                p_label = st.selectbox("校准产品", prod_display_names, key="cal_prod")
+                selected_p = prod_options[p_label]
+                sys_stock_kg = float(selected_p.get("stock_quantity", 0))
+                sys_stock_tons = sys_stock_kg / 1000.0
+                st.metric("系统账面库存", f"{sys_stock_tons:.5f} 吨")
                 
             with col2:
                 actual_stock = st.number_input("实物盘点库存 (吨)", min_value=0.0, step=0.00001, format="%.5f")
-                diff = actual_stock - sys_stock
+                diff = actual_stock - sys_stock_tons
                 st.metric("差异 (实盘-账面)", f"{diff:+.5f} 吨", delta=diff, delta_color="off")
             
             reason = st.text_input("差异原因说明 (必填)", placeholder="例如：盘亏、计量误差...")
@@ -246,7 +247,7 @@ def render_product_inventory_page(service: InventoryService):
                 else:
                     with UIManager.with_spinner("正在校准库存..."):
                         success, msg = service.calibrate_stock(
-                            p_name, actual_stock, reason,
+                            selected_p["product_name"], actual_stock, reason,
                             operator=st.session_state.get("username", "Admin")
                         )
                         if success:
@@ -284,10 +285,20 @@ def render_product_inventory_page(service: InventoryService):
         if not df_records.empty:
             df = df_records.copy()
             
-            # 1. 填充空缺的结存，避免 nan
+            # 1. 单位转换与填充：数据库存的是 kg，显示为 吨
+            if "quantity" in df.columns:
+                df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0.0) / 1000.0
+            
             if "snapshot_stock" not in df.columns:
                 df["snapshot_stock"] = None
-            df["snapshot_stock"] = df["snapshot_stock"].apply(lambda x: f"{x:.4f}" if pd.notnull(x) and isinstance(x, (int, float)) else "-")
+            
+            # 处理结存显示 (转换为吨)
+            def format_snapshot(val):
+                if pd.notnull(val) and isinstance(val, (int, float)):
+                    return f"{val/1000.0:.4f}"
+                return "-"
+            
+            df["snapshot_stock"] = df["snapshot_stock"].apply(format_snapshot)
             
             # 2. 确保有时间字段 (如果没有 created_at 就用 date 补)
             if "created_at" not in df.columns:
@@ -298,8 +309,8 @@ def render_product_inventory_page(service: InventoryService):
                 "created_at": "🕒 发生时间",
                 "product_name": "📦 产品名称",
                 "type": "🔄 变动类型",
-                "quantity": "🔢 变动数量",
-                "snapshot_stock": "💰 结存快照",
+                "quantity": "🔢 变动数量(吨)",
+                "snapshot_stock": "💰 结存快照(吨)",
                 "reason": "📝 备注/关联单据",
                 "operator": "👤 操作人"
             }
@@ -313,10 +324,10 @@ def render_product_inventory_page(service: InventoryService):
                 df_show,
                 use_container_width=True,
                 column_config={
-                    "🕒 发生时间": st.column_config.TextColumn("🕒 发生时间"), # 保持字符串格式以显示秒
+                    "🕒 发生时间": st.column_config.TextColumn("🕒 发生时间"), 
                     "🔄 变动类型": st.column_config.TextColumn("🔄 变动类型"),
-                    "🔢 变动数量": st.column_config.NumberColumn("🔢 变动数量", format="%.4f"),
-                    "💰 结存快照": st.column_config.TextColumn("💰 结存快照"), # 设为Text以兼容 "-" 字符
+                    "🔢 变动数量(吨)": st.column_config.NumberColumn("🔢 变动数量(吨)", format="%.4f"),
+                    "💰 结存快照(吨)": st.column_config.TextColumn("💰 结存快照(吨)"), 
                 },
                 height=500,
                 hide_index=True

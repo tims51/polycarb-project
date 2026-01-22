@@ -2,6 +2,7 @@ from services.data_service import DataService
 from services.auth_service import AuthService
 from services.inventory_service import InventoryService
 from services.bom_service import BOMService
+from services.experiment_service import ExperimentService
 
 class ServiceContainer:
     """
@@ -24,3 +25,6 @@ class ServiceContainer:
         
         # BOM 配方服务
         self.bom_service = BOMService(self.data_service)
+
+        # 实验管理服务
+        self.experiment_service = ExperimentService(self.data_service)
