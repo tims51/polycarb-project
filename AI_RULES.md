@@ -39,3 +39,19 @@
 ## 5. UI/UX 规范
 - **Master-Detail**: 管理类页面优先采用“左侧列表 + 右侧详情”布局。
 - **状态可视化**: 使用颜色标签区分状态 (Draft=Grey, Posted=Green, Cancelled=Red)。
+
+
+##6。 启用 Linter（代码检查器）： 在您的 IDE（如 VS Code）中配置 Ruff 或 Pylint。它们能瞬间标红未定义的变量（如之前的 inventory_service 或 stock_opening），防止低级错误进入运行时。
+
+##7. 引入类型检查（Type Hinting）： 继续坚持使用类型注解（如 def func(data: pd.DataFrame) -> None:）。配合 Mypy 工具，它能检查出您是否对一个 None 对象调用了方法，或者传入了错误的参数类型。
+
+##8 防御性初始化： 涉及累加或条件赋值的变量（如库存计算中的中间变量），务必在逻辑块的最开始给予默认值（如 0.0 或 None），避免因 if 分支未命中导致的变量未定义。
+
+##9 Pydantic 严格模式： 利用 Pydantic 进行更严格的数据清洗。在数据进入核心计算逻辑前，先通过 Model 过滤，确保所有必需字段（字段名、数据类型）都符合预期，避免运行时的 KeyError。
+
+##10 检查前置条件： 在执行写入/更新操作前，先检查目标状态。例如：if current_stock != target_stock: update()。
+使用数据库事务： 如果使用数据库，确保关键操作在事务（Transaction）中执行。要么全部成功，要么全部回滚，避免出现“扣了原材料但没生成成品”的中间状态。
+唯一约束（Unique Constraints）： 在数据库层面对关键字段（如产品编码、订单号）设置唯一索引，从底层防止重复数据的产生。
+
+##11参数传递规范： 规定 Service 层之间必须通过 Context 或 Container 传递，禁止散乱的参数列表。
+单位处理铁律： 再次强调“数据库存基准单位（如 kg），UI 负责转换”，并在代码审查中将其作为必查项。

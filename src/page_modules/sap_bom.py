@@ -6,6 +6,7 @@ import io
 import graphviz
 from utils.unit_helper import convert_quantity, normalize_unit
 from components.access_manager import check_page_permission, has_permission
+from components.material_selector import render_material_cascade_selector
 
 def _render_step_progress(current_status):
     """渲染生产订单步骤进度条"""
@@ -36,8 +37,12 @@ def _render_step_progress(current_status):
 def _render_bom_tree_graphviz(bom_tree):
     """使用 Graphviz 渲染 BOM 树"""
     dot = graphviz.Digraph(comment='BOM Tree')
-    dot.attr(rankdir='LR', size='8,5')
-    dot.attr('node', shape='box', style='rounded,filled', fontname='Microsoft YaHei', fontsize='10')
+    # 改为 TB (Top-to-Bottom) 布局，使节点水平排列，减少垂直空间占用
+    dot.attr(rankdir='TB', nodesep='0.3', ranksep='0.5')
+    dot.attr('node', shape='box', style='rounded,filled', 
+             fontname='Microsoft YaHei', fontsize='9', 
+             margin='0.1,0.05', height='0.3')
+    dot.attr('edge', color='#666666', arrowhead='vee', arrowsize='0.7')
 
     def add_nodes(node, parent_id=None):
         if not node: return
@@ -81,10 +86,10 @@ def render_sap_bom(bom_service, inventory_service, data_manager):
     tab1, tab2, tab3, tab4 = st.tabs(["🧬 BOM 管理", "🏭 生产管理", "🚚 发货管理", "📈 台账报表"])
     
     with tab1:
-        _render_bom_management(data_manager, bom_service)
+        _render_bom_management(data_manager, inventory_service, bom_service)
     
     with tab2:
-        _render_production_management(data_manager, bom_service)
+        _render_production_management(data_manager, bom_service, inventory_service)
 
     with tab3:
         _render_shipping_management(data_manager, inventory_service)
@@ -92,7 +97,7 @@ def render_sap_bom(bom_service, inventory_service, data_manager):
     with tab4:
         _render_inventory_reports(data_manager, bom_service)
 
-def _render_bom_management(data_manager, bom_service):
+def _render_bom_management(data_manager, inventory_service, bom_service):
     st.subheader("BOM 主数据管理")
     
     user = st.session_state.get("user")
@@ -199,7 +204,7 @@ def _render_bom_management(data_manager, bom_service):
                      else:
                          st.info("BOM 未找到")
                 elif bom:
-                    _render_bom_detail(data_manager, bom, bom_service)
+                    _render_bom_detail(data_manager, inventory_service, bom, bom_service)
                 else:
                     st.info("请在左侧选择 BOM")
         else:
@@ -280,7 +285,7 @@ def _render_bom_form(data_manager, bom=None):
              st.session_state.bom_edit_mode = False
              st.rerun()
 
-def _render_bom_detail(data_manager, bom, bom_service):
+def _render_bom_detail(data_manager, inventory_service, bom, bom_service):
     user = st.session_state.get("user")
     
     # Header with status and type
@@ -387,11 +392,9 @@ def _render_bom_detail(data_manager, bom, bom_service):
         st.info("暂无版本数据")
     else:
         ver_tabs = st.tabs([f"{v.get('version')} ({v.get('status') or 'approved'})" for v in versions])
-        materials = data_manager.get_all_raw_materials()
-        mat_options = {f"{m['name']} (ID: {m['id']}) ({m.get('material_number', '-')})": m['id'] for m in materials}
         for i, ver in enumerate(versions):
             with ver_tabs[i]:
-                _render_version_editor(data_manager, ver, mat_options)
+                _render_version_editor(data_manager, inventory_service, ver)
 
 
 def _build_bom_version_diff(version_a, version_b):
@@ -487,7 +490,7 @@ def _render_export_download(df, base_filename, key_prefix, csv_encoding="utf-8-s
         key=f"{key_prefix}_download",
     )
 
-def _render_version_editor(data_manager, version, mat_options):
+def _render_version_editor(data_manager, inventory_service, version):
     current_lines = version.get("lines", [])
     user = st.session_state.get("user")
     locked = bool(version.get("locked", False))
@@ -618,59 +621,47 @@ def _render_version_editor(data_manager, version, mat_options):
                 elif submitted:
                     st.error("密码错误")
         else:
-            # 获取原材料和成品库存选项
-            raw_materials = data_manager.get_all_raw_materials()
-            product_inventory = inventory_service.get_products()
+            # 使用级联选择器组件 (包含原材料和成品)
+            selected_id, selected_obj, item_type = render_material_cascade_selector(
+                data_manager, 
+                inventory_service=inventory_service, 
+                key_prefix=f"bom_add_{version['id']}",
+                include_products=True
+            )
             
-            combined_options = {}
-            for m in raw_materials:
-                label = f"[原材料] {m['name']} (ID: {m['id']}) ({m.get('material_number', '-')})"
-                combined_options[label] = f"raw_material:{m['id']}"
-            for p in product_inventory:
-                label = f"[成品] {p.get('product_name') or p.get('name')} (ID: {p['id']}) ({p.get('type', '其他')})"
-                combined_options[label] = f"product:{p['id']}"
-
             with st.form(f"add_line_form_{version['id']}", clear_on_submit=True):
-                lc1, lc2, lc3 = st.columns([3, 1, 1])
+                lc1, lc2 = st.columns([1, 1])
                 with lc1:
-                    sel_item_label = st.selectbox("选择物料 (原材料/产品)", list(combined_options.keys()))
-                with lc2:
                     l_qty = st.number_input("数量", min_value=0.0, step=0.1)
-                with lc3:
+                with lc2:
                     l_phase = st.text_input("阶段 (e.g. A料)", value="")
                 
-                # 新增替代料说明输入
                 l_subs = st.text_input("替代料说明 (可选)", placeholder="例如: 可用类似规格替代")
                 
-                submitted = st.form_submit_button("添加")
+                submitted = st.form_submit_button("确认添加")
                 if submitted:
-                    type_id_str = combined_options[sel_item_label]
-                    item_type, item_id = type_id_str.split(":")
-                    
-                    # 提取名称
-                    item_name = sel_item_label
-                    if "]" in item_name:
-                         try:
-                             item_name = item_name.split("] ", 1)[1].rsplit(" (", 1)[0]
-                         except:
-                             pass
-                    
-                    new_line = {
-                        "item_type": item_type,
-                        "item_id": int(item_id),
-                        "item_name": item_name,
-                        "qty": l_qty,
-                        "uom": "kg",
-                        "phase": l_phase,
-                        "remark": "",
-                        "substitutes": l_subs # 保存替代料
-                    }
-                    current_lines.append(new_line)
-                    data_manager.update_bom_version(version['id'], {"lines": current_lines})
-                    if user:
-                        detail = f"为 BOM 版本 {version.get('version')} 添加物料 {item_name} 数量 {l_qty} kg"
-                        data_manager.add_audit_log(user, "BOM_LINE_ADDED", detail)
-                    st.rerun()
+                    if not selected_id:
+                        st.error("请先选择物料")
+                    elif l_qty <= 0:
+                        st.error("数量必须大于 0")
+                    else:
+                        item_name = selected_obj.get('name') or selected_obj.get('product_name')
+                        new_line = {
+                            "item_type": item_type,
+                            "item_id": selected_id,
+                            "item_name": item_name,
+                            "qty": l_qty,
+                            "uom": "kg",
+                            "phase": l_phase,
+                            "remark": "",
+                            "substitutes": l_subs
+                        }
+                        current_lines.append(new_line)
+                        data_manager.update_bom_version(version['id'], {"lines": current_lines})
+                        if user:
+                            detail = f"为 BOM 版本 {version.get('version')} 添加物料 {item_name} 数量 {l_qty} kg"
+                            data_manager.add_audit_log(user, "BOM_LINE_ADDED", detail)
+                        st.rerun()
     st.divider()
     if not locked:
         if st.button("保存版本", key=f"save_version_{version['id']}"):
@@ -706,7 +697,7 @@ def _render_version_editor(data_manager, version, mat_options):
     else:
         st.success("版本已保存")
 
-def _render_production_management(data_manager, bom_service):
+def _render_production_management(data_manager, bom_service, inventory_service):
     st.subheader("生产订单管理")
     
     user = st.session_state.get("user")
@@ -894,7 +885,7 @@ def _render_production_scarcity_analysis(data_manager, boms, bom_map):
 def _render_production_create(data_manager):
     st.markdown("#### 🏭 新建生产订单")
     with st.container(border=True):
-        boms = bom_service.get_all_boms()
+        boms = data_manager.get_all_boms()
         bom_opts = {f"{b.get('bom_code')}-{b['bom_name']} (ID: {b['id']})": b for b in boms}
         sel_bom_label = st.selectbox("选择产品 BOM", list(bom_opts.keys()))
         sel_bom = bom_opts[sel_bom_label]
@@ -1014,7 +1005,7 @@ def _render_production_actions(data_manager, order, inventory_service):
     elif st.session_state.prod_view == "create":
         st.markdown("#### 新建生产单")
         
-        boms = bom_service.get_all_boms()
+        boms = data_manager.get_all_boms()
         bom_opts = {}
         for b in boms:
             code = b.get('bom_code', '').strip()

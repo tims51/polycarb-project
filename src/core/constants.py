@@ -28,3 +28,7 @@ PRODUCT_NAME_YJSNJ = "YJSNJ-有碱速凝剂"
 
 # 实验默认值
 DEFAULT_EXPERIMENT_PRIORITY = "中"
+
+# 原材料用途分类
+RAW_MATERIAL_CATEGORIES = ["母液合成", "速凝剂", "复配助剂", "防冻剂", "其他"]
+RAW_MATERIAL_USAGE_CATEGORIES = RAW_MATERIAL_CATEGORIES # 保持兼容性

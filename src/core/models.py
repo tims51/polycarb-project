@@ -53,6 +53,7 @@ class RawMaterial(BaseModelWithConfig):
     id: int
     name: str
     type: str = "普通原料"
+    usage_category: str = "其他"  # 已升级：用途分类 (锁定字段名)
     stock_quantity: float = 0.0
     unit: str = "kg"
     created_date: Optional[str] = None

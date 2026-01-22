@@ -5967,8 +5967,8 @@
             "id": 9,
             "product_name": "WJSNJ-无碱速凝剂",
             "unit": "kg",
-            "stock_quantity": 60625.72139303482,
-            "last_update": "2026-01-21 20:56:45",
+            "stock_quantity": 25625.721393034823,
+            "last_update": "2026-01-22 12:03:15",
             "type": "无碱速凝剂"
         },
         {
@@ -6006,15 +6006,15 @@
             "id": 14,
             "product_name": "SD-101A",
             "unit": "kg",
-            "stock_quantity": 67800.0,
-            "last_update": "2026-01-21 19:35:57"
+            "stock_quantity": 42800.0,
+            "last_update": "2026-01-22 12:01:03"
         },
         {
             "id": 15,
             "product_name": "SD-106D",
             "unit": "kg",
-            "stock_quantity": 35000.0,
-            "last_update": "2026-01-21 19:36:24"
+            "stock_quantity": 30000.0,
+            "last_update": "2026-01-22 12:01:18"
         },
         {
             "id": 16,
@@ -6664,6 +6664,84 @@
             "operator": "SystemFix",
             "snapshot_stock": 6056.442786069656,
             "unit": "kg"
+        },
+        {
+            "product_name": "WJSNJ-无碱速凝剂",
+            "product_type": "无碱速凝剂",
+            "type": "out",
+            "quantity": 10000.0,
+            "reason": "发货: 14局108高速  (原: 10.0吨)",
+            "operator": "admin",
+            "date": "2026-01-20",
+            "related_doc_type": "SHIPPING",
+            "id": 50,
+            "created_at": "2026-01-22 11:57:46",
+            "snapshot_stock": 50625.72139303482
+        },
+        {
+            "product_name": "SD-101A",
+            "product_type": "其他",
+            "type": "out",
+            "quantity": 15000.0,
+            "reason": "发货: 瑞创联  (原: 15.0吨)",
+            "operator": "admin",
+            "date": "2026-01-20",
+            "related_doc_type": "SHIPPING",
+            "id": 51,
+            "created_at": "2026-01-22 11:59:03",
+            "snapshot_stock": 52800.0
+        },
+        {
+            "product_name": "SD-101A",
+            "product_type": "其他",
+            "type": "out",
+            "quantity": 10000.0,
+            "reason": "发货: 瑞创联  (原: 10.0吨)",
+            "operator": "admin",
+            "date": "2026-01-21",
+            "related_doc_type": "SHIPPING",
+            "id": 52,
+            "created_at": "2026-01-22 12:01:03",
+            "snapshot_stock": 42800.0
+        },
+        {
+            "product_name": "SD-106D",
+            "product_type": "其他",
+            "type": "out",
+            "quantity": 5000.0,
+            "reason": "发货: 瑞创联  (原: 5.0吨)",
+            "operator": "admin",
+            "date": "2026-01-21",
+            "related_doc_type": "SHIPPING",
+            "id": 53,
+            "created_at": "2026-01-22 12:01:18",
+            "snapshot_stock": 30000.0
+        },
+        {
+            "product_name": "WJSNJ-无碱速凝剂",
+            "product_type": "无碱速凝剂",
+            "type": "out",
+            "quantity": 15000.0,
+            "reason": "发货: 14局108高速  (原: 15.0吨)",
+            "operator": "admin",
+            "date": "2026-01-22",
+            "related_doc_type": "SHIPPING",
+            "id": 54,
+            "created_at": "2026-01-22 12:02:29",
+            "snapshot_stock": 35625.72139303482
+        },
+        {
+            "product_name": "WJSNJ-无碱速凝剂",
+            "product_type": "无碱速凝剂",
+            "type": "out",
+            "quantity": 10000.0,
+            "reason": "发货: 19局108高速  (原: 10.0吨)",
+            "operator": "admin",
+            "date": "2026-01-22",
+            "related_doc_type": "SHIPPING",
+            "id": 55,
+            "created_at": "2026-01-22 12:03:15",
+            "snapshot_stock": 25625.721393034823
         }
     ],
     "users": [
@@ -7358,6 +7436,48 @@
             "role": "admin",
             "action": "ISSUE_POSTED",
             "detail": "对领料单 #16 (ISS-20260121-016) 执行过账"
+        },
+        {
+            "time": "2026-01-22 11:57:46",
+            "username": "admin",
+            "role": "admin",
+            "action": "SHIPPING_CREATED",
+            "detail": "发货 WJSNJ-无碱速凝剂，数量 10.0 吨，客户 14局108高速"
+        },
+        {
+            "time": "2026-01-22 11:59:03",
+            "username": "admin",
+            "role": "admin",
+            "action": "SHIPPING_CREATED",
+            "detail": "发货 SD-101A，数量 15.0 吨，客户 瑞创联"
+        },
+        {
+            "time": "2026-01-22 12:01:03",
+            "username": "admin",
+            "role": "admin",
+            "action": "SHIPPING_CREATED",
+            "detail": "发货 SD-101A，数量 10.0 吨，客户 瑞创联"
+        },
+        {
+            "time": "2026-01-22 12:01:18",
+            "username": "admin",
+            "role": "admin",
+            "action": "SHIPPING_CREATED",
+            "detail": "发货 SD-106D，数量 5.0 吨，客户 瑞创联"
+        },
+        {
+            "time": "2026-01-22 12:02:29",
+            "username": "admin",
+            "role": "admin",
+            "action": "SHIPPING_CREATED",
+            "detail": "发货 WJSNJ-无碱速凝剂，数量 15.0 吨，客户 14局108高速"
+        },
+        {
+            "time": "2026-01-22 12:03:16",
+            "username": "admin",
+            "role": "admin",
+            "action": "SHIPPING_CREATED",
+            "detail": "发货 WJSNJ-无碱速凝剂，数量 10.0 吨，客户 19局108高速"
         }
     ],
     "shipping_orders": [

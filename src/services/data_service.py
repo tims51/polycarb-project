@@ -29,7 +29,8 @@ from core.enums import (
 )
 from core.constants import (
     DATE_FORMAT, DATETIME_FORMAT, DEFAULT_UNIT_KG, WATER_MATERIAL_ALIASES, 
-    PRODUCT_NAME_WJSNJ, PRODUCT_NAME_YJSNJ, BACKUP_INTERVAL_SECONDS
+    PRODUCT_NAME_WJSNJ, PRODUCT_NAME_YJSNJ, BACKUP_INTERVAL_SECONDS,
+    RAW_MATERIAL_CATEGORIES
 )
 from utils.file_lock import file_lock
 
@@ -107,7 +108,36 @@ class DataService:
             if self.data_file.exists():
                 with open(self.data_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                return self._ensure_data_structure(data)
+                data = self._ensure_data_structure(data)
+                
+                # 数据迁移：标准化 usage_category 字段
+                if DataCategory.RAW_MATERIALS.value in data:
+                    materials = data[DataCategory.RAW_MATERIALS.value]
+                    migrated = False
+                    for m in materials:
+                        # 如果已有 usage_category，保留原值
+                        if "usage_category" in m and m["usage_category"]:
+                            # 如果之前有遗留的 usage 字段，清理掉
+                            if "usage" in m:
+                                del m["usage"]
+                                migrated = True
+                            continue
+                        
+                        # 尝试从旧的 usage 字段迁移
+                        old_usage = m.get("usage", "")
+                        if old_usage:
+                            m["usage_category"] = old_usage
+                            del m["usage"]
+                        else:
+                            m["usage_category"] = "其他"
+                        
+                        migrated = True
+                    
+                    if migrated:
+                        logger.info("Migrated raw material data to use 'usage_category' field.")
+                        self.save_data(data)
+                
+                return data
             else:
                 return self.get_initial_data()
         except Exception as e:
@@ -1392,8 +1422,10 @@ class DataService:
         # Determine name to check for duplicates
         if isinstance(material_data, RawMaterial):
             name = material_data.name
+            usage_category = material_data.usage_category
         else:
             name = material_data.get("name")
+            usage_category = material_data.get("usage_category", "其他")
         
         # 检查名称是否重复
         if name:
@@ -1412,6 +1444,8 @@ class DataService:
         else:
             material_data["id"] = new_id
             material_data["created_date"] = datetime.now().strftime("%Y-%m-%d")
+            if "usage_category" not in material_data:
+                material_data["usage_category"] = "其他"
             
             # Try validation
             try:

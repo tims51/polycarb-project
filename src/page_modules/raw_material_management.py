@@ -6,6 +6,7 @@ import pandas as pd
 import io
 from utils.unit_helper import convert_quantity, normalize_unit
 from components.ui_manager import UIManager
+from core.constants import RAW_MATERIAL_CATEGORIES
 
 def _render_batch_import(inventory_service, data_manager):
     st.markdown("### 📂 批量导入原材料")
@@ -417,8 +418,13 @@ def render_raw_material_management(inventory_service, data_manager):
                     supplier_rating = st.slider("供应商评分 (1-5)", 1, 5, 3, key=f"raw_supplier_rating_{form_id}")
                     qc_status = st.selectbox("QC 状态", ["合格", "待检", "不合格", "冻结"], key=f"raw_qc_status_{form_id}")
                 
-                usage_category_options = ["母液合成", "复配和助剂", "速凝剂"]
-                usage_categories = st.multiselect("用途*", usage_category_options, key=f"raw_usage_category_{form_id}")
+                # 用途分类升级为单选
+                usage_category = st.selectbox(
+                    "用途*", 
+                    options=RAW_MATERIAL_CATEGORIES,
+                    index=len(RAW_MATERIAL_CATEGORIES)-1, # 默认“其他”
+                    key=f"raw_usage_sel_{form_id}"
+                )
                 
                 col_inv1, col_inv2 = st.columns(2)
                 
@@ -436,12 +442,12 @@ def render_raw_material_management(inventory_service, data_manager):
                     # 默认使用吨，方便录入，后台自动转kg
                     stock_unit = st.selectbox("单位", ["ton", "kg"], index=0, key=f"raw_unit_{form_id}")
 
-                main_usage = st.text_area("详细用途描述", height=60, key=f"raw_main_usage_{form_id}")
+                main_usage = st.text_area("详细用途描述", height=60, key=f"raw_main_usage_desc_{form_id}")
                 
                 # 使用表单提交按钮
                 submitted = st.form_submit_button("添加原材料", type="primary")
                 if submitted:
-                    if material_name and material_number and usage_categories:
+                    if material_name and material_number and usage_category:
                         # 检查物料号是否重复
                         existing_numbers = [m.get("material_number") for m in raw_materials if m.get("material_number")]
                         if material_number in existing_numbers:
@@ -470,7 +476,7 @@ def render_raw_material_management(inventory_service, data_manager):
                                     "supplier": supplier,
                                     "supplier_rating": supplier_rating,
                                     "qc_status": qc_status,
-                                    "usage_category": ",".join(usage_categories),
+                                    "usage_category": usage_category,
                                     "main_usage": main_usage,
                                     "stock_quantity": initial_stock,
                                     "unit": stock_unit, # Service will convert to kg
@@ -500,41 +506,35 @@ def render_raw_material_management(inventory_service, data_manager):
         if not raw_materials:
             st.info("暂无原材料，请先添加原材料。")
         else:
+            # 使用级联选择器组件
+            from components.material_selector import render_material_cascade_selector
+            selected_mat_id, selected_material, item_type = render_material_cascade_selector(
+                data_manager, 
+                key_prefix="raw_inv_op"
+            )
+
             with st.form("inventory_op_form", clear_on_submit=True):
-                op_col1, op_col2, op_col3 = st.columns([2, 1, 1])
-                
-                # 下拉框标准化: 名称 (ID: {id})
-                mat_options = {f"{m['name']} (ID: {m['id']})": m['id'] for m in raw_materials}
+                op_col1, op_col2 = st.columns([1, 1])
                 
                 with op_col1:
-                    selected_mat_label = st.selectbox("选择原材料*", list(mat_options.keys()))
-                
+                    op_type = st.selectbox("操作类型*", ["入库", "出库"])
                 with op_col2:
-                    c2_1, c2_2 = st.columns(2)
-                    with c2_1:
-                        op_type = st.selectbox("操作类型*", ["入库", "出库"])
-                    with c2_2:
-                        # 提供常用单位
-                        common_units = ["ton", "kg", "g", "L", "mL", "吨", "公斤", "克"]
-                        op_unit = st.selectbox("单位", common_units, index=0) # 默认 ton
+                    # 提供常用单位
+                    common_units = ["ton", "kg", "g", "L", "mL", "吨", "公斤", "克"]
+                    op_unit = st.selectbox("单位", common_units, index=0) # 默认 ton
                     
-                with op_col3:
-                    op_qty = st.number_input("数量*", min_value=0.0, step=0.00001, format="%.5f")
-                
+                op_qty = st.number_input("数量*", min_value=0.0, step=0.00001, format="%.5f")
                 op_reason = st.text_input("备注/原因 (e.g. 采购入库, 生产领用)")
                 
                 op_submit = st.form_submit_button("提交库存变动", type="primary")
                 
                 if op_submit:
-                    with UIManager.with_spinner("正在处理库存变动..."):
-                        selected_mat_id = mat_options[selected_mat_label]
-                        selected_material = next((m for m in raw_materials if m['id'] == selected_mat_id), None)
-                        stock_unit = selected_material.get('unit', 'kg') if selected_material else 'kg'
-                        
-                        if op_qty > 0:
-                            # 统一使用 inventory_service.add_inventory_record
-                            # 该方法会自动将 input_unit 转换为 kg
-                            
+                    if not selected_mat_id:
+                        st.error("请先选择原材料")
+                    elif op_qty <= 0:
+                        st.error("数量必须大于 0")
+                    else:
+                        with UIManager.with_spinner("正在处理库存变动..."):
                             record_data = {
                                 "material_id": selected_mat_id,
                                 "type": "in" if op_type == "入库" else "out",
@@ -552,8 +552,6 @@ def render_raw_material_management(inventory_service, data_manager):
                                 st.rerun()
                             else:
                                 UIManager.toast(msg, type="error")
-                        else:
-                            UIManager.toast("数量必须大于0", type="warning")
 
     st.divider()
     st.subheader("📊 库存核对与原材料列表")
@@ -797,7 +795,7 @@ def render_raw_material_management(inventory_service, data_manager):
             
             # 获取所有供应商和用途供筛选
             all_suppliers = sorted(list(set([m.get("supplier", "") for m in raw_materials if m.get("supplier")])))
-            all_usages = sorted(list(set([u.strip() for m in raw_materials for u in m.get("usage_category", "").split(",") if u.strip()])))
+            all_usages = RAW_MATERIAL_CATEGORIES
             
             with f_col2:
                 filter_suppliers = st.multiselect("供应商", all_suppliers, key="raw_filter_suppliers")
@@ -820,342 +818,334 @@ def render_raw_material_management(inventory_service, data_manager):
             filtered_materials = [m for m in filtered_materials if m.get("supplier") in filter_suppliers]
             
         if filter_usages:
-            # Check if any selected usage matches any usage of the material
             filtered_materials = [
                 m for m in filtered_materials 
-                if any(u in m.get("usage_category", "") for u in filter_usages)
+                if m.get("usage_category") in filter_usages
             ]
+        
+        # 3. 显示表格 (使用 UIManager.render_data_table 以适应移动端)
+        if filtered_materials:
+            # 构造 DataFrame
+            df_display = pd.DataFrame(filtered_materials)
             
-            # 3. 显示表格 (使用 UIManager.render_data_table 以适应移动端)
-            if filtered_materials:
-                # 构造 DataFrame
-                df_display = pd.DataFrame(filtered_materials)
+            # --- 库存显示优化: 转换为吨 ---
+            if "stock_quantity" in df_display.columns:
+                # 创建副本进行计算，新增 display_stock_t 列
+                def _to_ton(row):
+                    qty = float(row.get("stock_quantity") or 0.0)
+                    unit = str(row.get("unit") or "kg")
+                    val, ok = convert_quantity(qty, unit, "ton")
+                    return round(val, 4) if ok else round(qty, 4)
                 
-                # --- 库存显示优化: 转换为吨 ---
-                if "stock_quantity" in df_display.columns:
-                    # 创建副本进行计算，新增 display_stock_t 列
-                    def _to_ton(row):
-                        qty = float(row.get("stock_quantity") or 0.0)
-                        unit = str(row.get("unit") or "kg")
-                        val, ok = convert_quantity(qty, unit, "ton")
-                        return round(val, 4) if ok else round(qty, 4)
-                    
-                    df_display["display_stock_t"] = df_display.apply(_to_ton, axis=1)
+                df_display["display_stock_t"] = df_display.apply(_to_ton, axis=1)
+            else:
+                df_display["display_stock_t"] = 0.0
+            
+            # 添加 Select 列用于操作
+            df_display["选择"] = False
+            
+            # 映射列名
+            column_map = {
+                "name": "名称",
+                "material_number": "物料号",
+                "display_stock_t": "当前库存 (吨)",
+                "unit": "原始单位",
+                "abbreviation": "缩写",
+                "supplier": "供应商",
+                "qc_status": "QC状态",
+                "usage_category": "用途",
+                "chemical_formula": "化学式",
+                "molecular_weight": "分子量",
+                "solid_content": "固含(%)",
+                "unit_price": "单价"
+                # stock_quantity 不重命名，以便在 config 中引用并隐藏
+            }
+            
+            # 调整列顺序
+            # 优先显示: 选择, 名称, 当前库存(吨), 原始单位, 物料号, 供应商, QC状态
+            priority_cols = ["选择", "id", "name", "display_stock_t", "unit", "material_number", "supplier", "qc_status"]
+            other_cols = [c for c in df_display.columns if c not in priority_cols and c != "stock_quantity"]
+            
+            # 确保 stock_quantity 在最后（将被隐藏）
+            final_cols = priority_cols + other_cols + ["stock_quantity"]
+            final_cols = [c for c in final_cols if c in df_display.columns]
+            
+            df_display = df_display[final_cols]
+            
+            # 重命名
+            df_display = df_display.rename(columns=column_map)
+            
+            # 配置列
+            column_config = {
+                "id": None, # 隐藏 ID
+                "stock_quantity": None, # 隐藏原始库存(kg)
+                "选择": st.column_config.CheckboxColumn("选择", help="勾选以进行编辑或删除", width="small"),
+                "名称": st.column_config.TextColumn("名称", width="medium", required=True),
+                "物料号": st.column_config.TextColumn("物料号", width="small"),
+                "当前库存 (吨)": st.column_config.NumberColumn(
+                    "当前库存 (吨)", 
+                    format="%.5f", 
+                    help="系统自动转换显示为吨，实际存储为kg"
+                ),
+                "原始单位": st.column_config.TextColumn("原始单位", width="small"),
+                "固含(%)": st.column_config.NumberColumn("固含(%)", format="%.1f%%"),
+                "单价": st.column_config.NumberColumn("单价", format="¥%.2f"),
+            }
+            
+            st.caption(f"共找到 {len(filtered_materials)} 条记录。勾选左侧选框进行操作。")
+            
+            # 提示信息：引导用户去正确的地方修改库存
+            st.info("ℹ️ 如需调整库存数量，请使用页面顶部的“库存操作”区域，或前往“数据管理 -> 库存初始化”页面。列表页库存仅供查看。", icon="ℹ️")
+            
+            # 正常渲染
+            edited_df = st.data_editor(
+                df_display,
+                column_config=column_config,
+                # 禁止除了“选择”以外的所有列编辑
+                disabled=[c for c in df_display.columns if c != "选择"],
+                hide_index=True,
+                use_container_width=True,
+                key=f"raw_mat_editor_{st.session_state.get('raw_material_query_signature', 0)}" 
+            )
+            
+            # 4. 操作栏 (当有选中项时显示)
+            selected_rows = edited_df[edited_df["选择"] == True]
+            
+        if not selected_rows.empty:
+            st.info(f"已选择 {len(selected_rows)} 项")
+            action_col1, action_col2, action_col3, _ = st.columns([1, 1, 1.2, 2.8])
+            
+            with action_col1:
+                # 编辑按钮 (仅当选中1项时可用)
+                if len(selected_rows) == 1:
+                    if st.button("✏️ 编辑选中项", type="primary", use_container_width=True):
+                        selected_id = int(selected_rows.iloc[0]["id"])
+                        st.session_state.raw_material_edit_id = selected_id
+                        st.session_state.raw_material_edit_form_id = str(uuid.uuid4())[:8]
+                        st.rerun()
                 else:
-                    df_display["display_stock_t"] = 0.0
-                
-                # 添加 Select 列用于操作
-                df_display["选择"] = False
-                
-                # 映射列名
-                column_map = {
-                    "name": "名称",
-                    "material_number": "物料号",
-                    "display_stock_t": "当前库存 (吨)",
-                    "unit": "原始单位",
-                    "abbreviation": "缩写",
-                    "supplier": "供应商",
-                    "qc_status": "QC状态",
-                    "usage_category": "用途",
-                    "chemical_formula": "化学式",
-                    "molecular_weight": "分子量",
-                    "solid_content": "固含(%)",
-                    "unit_price": "单价"
-                    # stock_quantity 不重命名，以便在 config 中引用并隐藏
-                }
-                
-                # 调整列顺序
-                # 优先显示: 选择, 名称, 当前库存(吨), 原始单位, 物料号, 供应商, QC状态
-                priority_cols = ["选择", "id", "name", "display_stock_t", "unit", "material_number", "supplier", "qc_status"]
-                other_cols = [c for c in df_display.columns if c not in priority_cols and c != "stock_quantity"]
-                
-                # 确保 stock_quantity 在最后（将被隐藏）
-                final_cols = priority_cols + other_cols + ["stock_quantity"]
-                final_cols = [c for c in final_cols if c in df_display.columns]
-                
-                df_display = df_display[final_cols]
-                
-                # 重命名
-                df_display = df_display.rename(columns=column_map)
-                
-                # 配置列
-                column_config = {
-                    "id": None, # 隐藏 ID
-                    "stock_quantity": None, # 隐藏原始库存(kg)
-                    "选择": st.column_config.CheckboxColumn("选择", help="勾选以进行编辑或删除", width="small"),
-                    "名称": st.column_config.TextColumn("名称", width="medium", required=True),
-                    "物料号": st.column_config.TextColumn("物料号", width="small"),
-                    "当前库存 (吨)": st.column_config.NumberColumn(
-                        "当前库存 (吨)", 
-                        format="%.5f", 
-                        help="系统自动转换显示为吨，实际存储为kg"
-                    ),
-                    "原始单位": st.column_config.TextColumn("原始单位", width="small"),
-                    "固含(%)": st.column_config.NumberColumn("固含(%)", format="%.1f%%"),
-                    "单价": st.column_config.NumberColumn("单价", format="¥%.2f"),
-                }
-                
-                st.caption(f"共找到 {len(filtered_materials)} 条记录。勾选左侧选框进行操作。")
-                
-                # 提示信息：引导用户去正确的地方修改库存
-                st.info("ℹ️ 如需调整库存数量，请使用页面顶部的“库存操作”区域，或前往“数据管理 -> 库存初始化”页面。列表页库存仅供查看。", icon="ℹ️")
-
-                # 正常渲染
-                edited_df = st.data_editor(
-                    df_display,
-                    column_config=column_config,
-                    # 禁止除了“选择”以外的所有列编辑
-                    disabled=[c for c in df_display.columns if c != "选择"],
-                    hide_index=True,
-                    use_container_width=True,
-                    key=f"raw_mat_editor_{st.session_state.get('raw_material_query_signature', 0)}" 
-                )
-                
-                # 4. 操作栏 (当有选中项时显示)
-                selected_rows = edited_df[edited_df["选择"] == True]
+                    st.button("✏️ 编辑选中项", disabled=True, help="请仅选择一项进行编辑", use_container_width=True)
             
-            if not selected_rows.empty:
-                st.info(f"已选择 {len(selected_rows)} 项")
-                action_col1, action_col2, action_col3, _ = st.columns([1, 1, 1.2, 2.8])
-                
-                with action_col1:
-                    # 编辑按钮 (仅当选中1项时可用)
+            with action_col2:
+                # 删除按钮
+                if st.button("🗑️ 删除选中项", type="secondary", use_container_width=True):
+                    # 目前仅支持单删，如果要批量删除需要循环
                     if len(selected_rows) == 1:
-                        if st.button("✏️ 编辑选中项", type="primary", use_container_width=True):
-                            selected_id = int(selected_rows.iloc[0]["id"])
-                            st.session_state.raw_material_edit_id = selected_id
-                            st.session_state.raw_material_edit_form_id = str(uuid.uuid4())[:8]
-                            st.rerun()
+                        selected_id = int(selected_rows.iloc[0]["id"])
+                        st.session_state.raw_material_delete_id = selected_id
+                        st.rerun()
                     else:
-                        st.button("✏️ 编辑选中项", disabled=True, help="请仅选择一项进行编辑", use_container_width=True)
-                
-                with action_col2:
-                    # 删除按钮
-                    if st.button("🗑️ 删除选中项", type="secondary", use_container_width=True):
-                        # 目前仅支持单删，如果要批量删除需要循环
-                        if len(selected_rows) == 1:
-                            selected_id = int(selected_rows.iloc[0]["id"])
-                            st.session_state.raw_material_delete_id = selected_id
-                            st.rerun()
-                        else:
-                            st.warning("目前仅支持单项删除，请只选择一项。")
+                        st.warning("目前仅支持单项删除，请只选择一项。")
 
-                with action_col3:
-                    # 复制添加按钮
-                    if st.button("📋 复制添加选中项", type="secondary", use_container_width=True):
-                        success_count = 0
-                        fail_count = 0
+            with action_col3:
+                # 复制添加按钮
+                if st.button("📋 复制添加选中项", type="secondary", use_container_width=True):
+                    success_count = 0
+                    fail_count = 0
+                    
+                    for idx, row in selected_rows.iterrows():
+                        original_id = int(row["id"])
+                        original_mat = next((m for m in raw_materials if m["id"] == original_id), None)
                         
-                        for idx, row in selected_rows.iterrows():
-                            original_id = int(row["id"])
-                            original_mat = next((m for m in raw_materials if m["id"] == original_id), None)
+                        if original_mat:
+                            new_mat = original_mat.copy()
+                            if "id" in new_mat: del new_mat["id"]
                             
-                            if original_mat:
-                                new_mat = original_mat.copy()
-                                if "id" in new_mat: del new_mat["id"]
-                                
-                                # 生成唯一后缀
-                                suffix = datetime.now().strftime("%H%M%S") + str(uuid.uuid4())[:4]
-                                
-                                new_mat["name"] = f"{new_mat['name']}_copy"
-                                if new_mat.get("material_number"):
-                                    new_mat["material_number"] = f"{new_mat['material_number']}_{suffix}"
-                                
-                                new_mat["created_date"] = datetime.now().strftime("%Y-%m-%d")
-                                new_mat["stock_quantity"] = 0 # 复制时不复制库存
-                                
-                                success, msg = data_manager.add_raw_material(new_mat)
-                                if success:
-                                    success_count += 1
-                                else:
-                                    fail_count += 1
-                                    st.error(f"复制 {row.get('名称', '')} 失败: {msg}")
-                        
-                        if success_count > 0:
-                            st.success(f"成功复制 {success_count} 项")
-                            time.sleep(1)
-                            st.rerun()
+                            # 生成唯一后缀
+                            suffix = datetime.now().strftime("%H%M%S") + str(uuid.uuid4())[:4]
+                            
+                            new_mat["name"] = f"{new_mat['name']}_copy"
+                            if new_mat.get("material_number"):
+                                new_mat["material_number"] = f"{new_mat['material_number']}_{suffix}"
+                            
+                            new_mat["created_date"] = datetime.now().strftime("%Y-%m-%d")
+                            new_mat["stock_quantity"] = 0 # 复制时不复制库存
+                            
+                            success, msg = data_manager.add_raw_material(new_mat)
+                            if success:
+                                success_count += 1
+                            else:
+                                fail_count += 1
+                                st.error(f"复制 {row.get('名称', '')} 失败: {msg}")
+                    
+                    if success_count > 0:
+                        st.success(f"成功复制 {success_count} 项")
+                        time.sleep(1)
+                        st.rerun()
 
-            # --------------------------------------------------------
-            # 以下是原有的弹窗和编辑表单逻辑 (保持不变)
-            # --------------------------------------------------------
+        # --------------------------------------------------------
+        # 以下是原有的弹窗和编辑表单逻辑 (保持不变)
+        # --------------------------------------------------------
+        
+        delete_id = st.session_state.get("raw_material_delete_id")
+        if delete_id is not None:
+            deleting_mat = next((m for m in raw_materials if m.get("id") == delete_id), None)
+            if not deleting_mat:
+                st.session_state.raw_material_delete_id = None
+                st.rerun()
             
-            delete_id = st.session_state.get("raw_material_delete_id")
-            if delete_id is not None:
-                deleting_mat = next((m for m in raw_materials if m.get("id") == delete_id), None)
-                if not deleting_mat:
-                    st.session_state.raw_material_delete_id = None
-                    st.rerun()
+            delete_raw_material_dialog(delete_id, deleting_mat.get('name', ''), data_manager)
+        
+        edit_id = st.session_state.get("raw_material_edit_id")
+        if edit_id is not None:
+            editing_mat = next((m for m in raw_materials if m.get("id") == edit_id), None)
+            if not editing_mat:
+                st.session_state.raw_material_edit_id = None
+                st.session_state.raw_material_edit_form_id = None
+                st.rerun()
+            
+            form_uid = st.session_state.get("raw_material_edit_form_id") or str(uuid.uuid4())[:8]
+            st.session_state.raw_material_edit_form_id = form_uid
+            
+            with st.expander(f"✏️ 编辑原材料：{editing_mat.get('name', '')} (ID: {edit_id})", expanded=True):
+                with st.form(f"edit_raw_material_form_{form_uid}"):
+                    e_col1, e_col2 = st.columns(2)
+                    with e_col1:
+                        e_name = st.text_input("原材料名称*", value=str(editing_mat.get("name", "")), key=f"raw_e_name_{form_uid}")
+                        e_material_number = st.text_input("物料号", value=str(editing_mat.get("material_number", "")), key=f"raw_e_material_number_{form_uid}")
+                        e_chemical = st.text_input("化学式", value=str(editing_mat.get("chemical_formula", "")), key=f"raw_e_chem_{form_uid}")
+                        e_mw = st.number_input(
+                            "分子量 (g/mol)",
+                            min_value=0.0,
+                            step=0.01,
+                            value=float(editing_mat.get("molecular_weight") or 0.0),
+                            key=f"raw_e_mw_{form_uid}",
+                        )
+                        e_solid = st.number_input(
+                            "固含 (%)",
+                            min_value=0.0,
+                            max_value=100.0,
+                            step=0.1,
+                            value=float(editing_mat.get("solid_content") or 0.0),
+                            key=f"raw_e_solid_{form_uid}",
+                        )
+                    with e_col2:
+                        e_abbreviation = st.text_input("缩写", value=str(editing_mat.get("abbreviation", "")), key=f"raw_e_abbreviation_{form_uid}")
+                        e_price = st.number_input(
+                            "单价 (元/吨)",
+                            min_value=0.0,
+                            step=0.1,
+                            value=float(editing_mat.get("unit_price") or 0.0),
+                            key=f"raw_e_price_{form_uid}",
+                        )
+                        odor_options = ["无", "轻微", "中等", "强烈", "刺激性"]
+                        current_odor = editing_mat.get("odor", "无")
+                        e_odor = st.selectbox(
+                            "气味",
+                            options=odor_options,
+                            index=odor_options.index(current_odor) if current_odor in odor_options else 0,
+                            key=f"raw_e_odor_{form_uid}",
+                        )
+                        e_storage = st.text_input("存储条件", value=str(editing_mat.get("storage_condition", "")), key=f"raw_e_storage_{form_uid}")
+                        e_supplier = st.text_input("供应商", value=str(editing_mat.get("supplier", "")), key=f"raw_e_supplier_{form_uid}")
+                        e_rating = st.slider("供应商评分", 1, 5, int(editing_mat.get("supplier_rating", 3)), key=f"raw_e_rating_{form_uid}")
+                        curr_qc = editing_mat.get("qc_status", "合格")
+                        qc_opts = ["合格", "待检", "不合格", "冻结"]
+                        e_qc = st.selectbox("QC 状态", qc_opts, index=qc_opts.index(curr_qc) if curr_qc in qc_opts else 0, key=f"raw_e_qc_{form_uid}")
                 
-                delete_raw_material_dialog(delete_id, deleting_mat.get('name', ''), data_manager)
-            
-            edit_id = st.session_state.get("raw_material_edit_id")
-            if edit_id is not None:
-                editing_mat = next((m for m in raw_materials if m.get("id") == edit_id), None)
-                if not editing_mat:
+                    # 用途分类升级为单选
+                    e_usage_category = st.selectbox(
+                        "用途*", 
+                        options=RAW_MATERIAL_CATEGORIES,
+                        index=RAW_MATERIAL_CATEGORIES.index(editing_mat.get("usage_category", "其他")) if editing_mat.get("usage_category") in RAW_MATERIAL_CATEGORIES else len(RAW_MATERIAL_CATEGORIES)-1,
+                        key=f"raw_e_usage_sel_{form_uid}"
+                    )
+                    
+                    e_inv_col1, e_inv_col2 = st.columns(2)
+                    
+                    e_name_val = editing_mat.get("name", "") or ""
+                    water_names = ["水", "自来水", "纯水", "去离子水", "工业用水", "生产用水"]
+                    is_water_edit = e_name_val.strip() in water_names
+                    
+                    base_stock_qty = float(editing_mat.get("stock_quantity") or 0.0)
+                    base_unit = str(editing_mat.get("unit", "kg") or "kg")
+                    stock_ton_val, stock_ton_ok = convert_quantity(base_stock_qty, base_unit, "ton")
+                    display_stock = stock_ton_val if stock_ton_ok else base_stock_qty
+                    
+                    with e_inv_col1:
+                        e_stock_ton = st.number_input(
+                            "当前库存 (吨)",
+                            min_value=0.0,
+                            step=0.00001,
+                            format="%.5f",
+                            value=display_stock,
+                            key=f"raw_e_stock_{form_uid}"
+                        )
+                    with e_inv_col2:
+                        if editing_mat.get("name") and "水" in editing_mat.get("name") and "减水" not in editing_mat.get("name"):
+                            e_unit = st.text_input("单位", value=str(editing_mat.get("unit", "ton")), key=f"raw_e_unit_{form_uid}")
+                        else:
+                            e_unit = st.text_input("单位", value=str(editing_mat.get("unit", "kg")), key=f"raw_e_unit_{form_uid}")
+
+                    e_usage_desc = st.text_area("详细用途描述", value=str(editing_mat.get("main_usage", "")), height=60, key=f"raw_e_usage_desc_{form_uid}")
+                    
+                    b1, b2, b3 = st.columns(3)
+                    with b1:
+                        save = st.form_submit_button("💾 保存修改", type="primary", use_container_width=True)
+                    with b2:
+                        cancel = st.form_submit_button("❌ 取消", use_container_width=True)
+                    with b3:
+                        reset = st.form_submit_button("🔄 重置", use_container_width=True)
+                    
+                    if save:
+                        if not e_name.strip() or not e_material_number.strip() or not e_usage_category:
+                            st.error("请填写带*的必填项 (名称、物料号、用途)")
+                        else:
+                            # 检查物料号是否重复 (排除自己)
+                            other_numbers = [m.get("material_number") for m in raw_materials if m.get("id") != edit_id and m.get("material_number")]
+                            if e_material_number.strip() in other_numbers:
+                                 st.error(f"物料号 '{e_material_number.strip()}' 已存在！")
+                            else:
+                                # 检查名称+供应商是否重复 (排除自己)
+                                duplicate_exists = False
+                                for m in raw_materials:
+                                    if m.get("id") != edit_id:
+                                        if m.get("name") == e_name.strip() and m.get("supplier") == e_supplier.strip():
+                                            duplicate_exists = True
+                                            break
+                                
+                                if duplicate_exists:
+                                    st.error(f"原材料 '{e_name.strip()}' (供应商: {e_supplier.strip()}) 已存在！")
+                                else:
+                                    target_unit = e_unit.strip() or base_unit
+                                    updated_fields = {
+                                        "name": e_name.strip(),
+                                        "material_number": e_material_number.strip(),
+                                        "abbreviation": e_abbreviation.strip(),
+                                        "chemical_formula": e_chemical.strip(),
+                                        "molecular_weight": float(e_mw),
+                                        "solid_content": float(e_solid),
+                                        "unit_price": float(e_price),
+                                        "odor": e_odor,
+                                        "storage_condition": e_storage.strip(),
+                                        "supplier": e_supplier.strip(),
+                                        "supplier_rating": e_rating,
+                                        "qc_status": e_qc,
+                                        "stock_quantity": float(e_stock_ton),
+                                        "unit": "ton", # Service will convert to kg
+                                        "usage_category": e_usage_category,
+                                        "main_usage": e_usage_desc.strip(),
+                                    }
+                                    # 使用 inventory_service 更新，确保单位转换逻辑一致
+                                    success, msg = inventory_service.update_raw_material(edit_id, updated_fields)
+                                    if success:
+                                        st.success("保存成功")
+                                        st.session_state.raw_material_edit_id = None
+                                        st.session_state.raw_material_edit_form_id = None
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    else:
+                                        st.error(f"保存失败: {msg}")
+                
+                if cancel:
                     st.session_state.raw_material_edit_id = None
                     st.session_state.raw_material_edit_form_id = None
+                    time.sleep(0.2)
                     st.rerun()
                 
-                form_uid = st.session_state.get("raw_material_edit_form_id") or str(uuid.uuid4())[:8]
-                st.session_state.raw_material_edit_form_id = form_uid
-                
-                with st.expander(f"✏️ 编辑原材料：{editing_mat.get('name', '')} (ID: {edit_id})", expanded=True):
-                    with st.form(f"edit_raw_material_form_{form_uid}"):
-                        e_col1, e_col2 = st.columns(2)
-                        with e_col1:
-                            e_name = st.text_input("原材料名称*", value=str(editing_mat.get("name", "")), key=f"raw_e_name_{form_uid}")
-                            e_material_number = st.text_input("物料号", value=str(editing_mat.get("material_number", "")), key=f"raw_e_material_number_{form_uid}")
-                            e_chemical = st.text_input("化学式", value=str(editing_mat.get("chemical_formula", "")), key=f"raw_e_chem_{form_uid}")
-                            e_mw = st.number_input(
-                                "分子量 (g/mol)",
-                                min_value=0.0,
-                                step=0.01,
-                                value=float(editing_mat.get("molecular_weight") or 0.0),
-                                key=f"raw_e_mw_{form_uid}",
-                            )
-                            e_solid = st.number_input(
-                                "固含 (%)",
-                                min_value=0.0,
-                                max_value=100.0,
-                                step=0.1,
-                                value=float(editing_mat.get("solid_content") or 0.0),
-                                key=f"raw_e_solid_{form_uid}",
-                            )
-                        with e_col2:
-                            e_abbreviation = st.text_input("缩写", value=str(editing_mat.get("abbreviation", "")), key=f"raw_e_abbreviation_{form_uid}")
-                            e_price = st.number_input(
-                                "单价 (元/吨)",
-                                min_value=0.0,
-                                step=0.1,
-                                value=float(editing_mat.get("unit_price") or 0.0),
-                                key=f"raw_e_price_{form_uid}",
-                            )
-                            odor_options = ["无", "轻微", "中等", "强烈", "刺激性"]
-                            current_odor = editing_mat.get("odor", "无")
-                            e_odor = st.selectbox(
-                                "气味",
-                                options=odor_options,
-                                index=odor_options.index(current_odor) if current_odor in odor_options else 0,
-                                key=f"raw_e_odor_{form_uid}",
-                            )
-                            e_storage = st.text_input("存储条件", value=str(editing_mat.get("storage_condition", "")), key=f"raw_e_storage_{form_uid}")
-                            e_supplier = st.text_input("供应商", value=str(editing_mat.get("supplier", "")), key=f"raw_e_supplier_{form_uid}")
-                            e_rating = st.slider("供应商评分", 1, 5, int(editing_mat.get("supplier_rating", 3)), key=f"raw_e_rating_{form_uid}")
-                            curr_qc = editing_mat.get("qc_status", "合格")
-                            qc_opts = ["合格", "待检", "不合格", "冻结"]
-                            e_qc = st.selectbox("QC 状态", qc_opts, index=qc_opts.index(curr_qc) if curr_qc in qc_opts else 0, key=f"raw_e_qc_{form_uid}")
-                        
-                        e_inv_col1, e_inv_col2 = st.columns(2)
-                        
-                        e_name_val = editing_mat.get("name", "") or ""
-                        water_names = ["水", "自来水", "纯水", "去离子水", "工业用水", "生产用水"]
-                        is_water_edit = e_name_val.strip() in water_names
-                        
-                        base_stock_qty = float(editing_mat.get("stock_quantity") or 0.0)
-                        base_unit = str(editing_mat.get("unit", "kg") or "kg")
-                        stock_ton_val, stock_ton_ok = convert_quantity(base_stock_qty, base_unit, "ton")
-                        display_stock = stock_ton_val if stock_ton_ok else base_stock_qty
-                        
-                        with e_inv_col1:
-                            e_stock_ton = st.number_input(
-                                "当前库存 (吨)",
-                                min_value=0.0,
-                                step=0.00001,
-                                format="%.5f",
-                                value=display_stock,
-                                key=f"raw_e_stock_{form_uid}"
-                            )
-                        with e_inv_col2:
-                            if editing_mat.get("name") and "水" in editing_mat.get("name") and "减水" not in editing_mat.get("name"):
-                                e_unit = st.text_input("单位", value=str(editing_mat.get("unit", "ton")), key=f"raw_e_unit_{form_uid}")
-                            else:
-                                e_unit = st.text_input("单位", value=str(editing_mat.get("unit", "kg")), key=f"raw_e_unit_{form_uid}")
-
-                        e_usage_category_options = ["母液合成", "复配和助剂", "速凝剂"]
-                        current_usage_category_str = editing_mat.get("usage_category", "")
-                        current_usage_categories = []
-                        if current_usage_category_str:
-                            current_usage_categories = [c.strip() for c in current_usage_category_str.split(",")]
-                        
-                        # Filter out invalid options just in case
-                        current_usage_categories = [c for c in current_usage_categories if c in e_usage_category_options]
-                        
-                        e_usage_categories = st.multiselect(
-                            "用途*", 
-                            options=e_usage_category_options,
-                            default=current_usage_categories,
-                            key=f"raw_e_usage_category_{form_uid}"
-                        )
-                        e_usage = st.text_area("详细用途描述", value=str(editing_mat.get("main_usage", "")), height=60, key=f"raw_e_usage_{form_uid}")
-                        
-                        b1, b2, b3 = st.columns(3)
-                        with b1:
-                            save = st.form_submit_button("💾 保存修改", type="primary", use_container_width=True)
-                        with b2:
-                            cancel = st.form_submit_button("❌ 取消", use_container_width=True)
-                        with b3:
-                            reset = st.form_submit_button("🔄 重置", use_container_width=True)
-                        
-                        if save:
-                            if not e_name.strip() or not e_material_number.strip() or not e_usage_categories:
-                                st.error("请填写带*的必填项 (名称、物料号、用途)")
-                            else:
-                                # 检查物料号是否重复 (排除自己)
-                                other_numbers = [m.get("material_number") for m in raw_materials if m.get("id") != edit_id and m.get("material_number")]
-                                if e_material_number.strip() in other_numbers:
-                                     st.error(f"物料号 '{e_material_number.strip()}' 已存在！")
-                                else:
-                                    # 检查名称+供应商是否重复 (排除自己)
-                                    duplicate_exists = False
-                                    for m in raw_materials:
-                                        if m.get("id") != edit_id:
-                                            if m.get("name") == e_name.strip() and m.get("supplier") == e_supplier.strip():
-                                                duplicate_exists = True
-                                                break
-                                    
-                                    if duplicate_exists:
-                                        st.error(f"原材料 '{e_name.strip()}' (供应商: {e_supplier.strip()}) 已存在！")
-                                    else:
-                                        target_unit = e_unit.strip() or base_unit
-                                        updated_fields = {
-                                            "name": e_name.strip(),
-                                            "material_number": e_material_number.strip(),
-                                            "abbreviation": e_abbreviation.strip(),
-                                            "chemical_formula": e_chemical.strip(),
-                                            "molecular_weight": float(e_mw),
-                                            "solid_content": float(e_solid),
-                                            "unit_price": float(e_price),
-                                            "odor": e_odor,
-                                            "storage_condition": e_storage.strip(),
-                                            "supplier": e_supplier.strip(),
-                                            "supplier_rating": e_rating,
-                                            "qc_status": e_qc,
-                                            "stock_quantity": float(e_stock_ton),
-                                            "unit": "ton", # Service will convert to kg
-                                            "usage_category": ",".join(e_usage_categories),
-                                            "main_usage": e_usage.strip(),
-                                        }
-                                        # 使用 inventory_service 更新，确保单位转换逻辑一致
-                                        success, msg = inventory_service.update_raw_material(edit_id, updated_fields)
-                                        if success:
-                                            st.success("保存成功")
-                                            st.session_state.raw_material_edit_id = None
-                                            st.session_state.raw_material_edit_form_id = None
-                                            time.sleep(0.5)
-                                            st.rerun()
-                                        else:
-                                            st.error(f"保存失败: {msg}")
-                        
-                        if cancel:
-                            st.session_state.raw_material_edit_id = None
-                            st.session_state.raw_material_edit_form_id = None
-                            time.sleep(0.2)
-                            st.rerun()
-                        
-                        if reset:
-                            st.session_state.raw_material_edit_form_id = str(uuid.uuid4())[:8]
-                            st.rerun()
+                if reset:
+                    st.session_state.raw_material_edit_form_id = str(uuid.uuid4())[:8]
+                    st.rerun()
         else:
             st.info("没有找到匹配的原材料")
     else:
