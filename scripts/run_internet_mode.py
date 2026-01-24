@@ -58,37 +58,41 @@ def start_cloudflared():
 
 def extract_url_from_logs(process, stop_event):
     """Monitor Cloudflare logs to extract the public URL."""
+    # 兼容多种 Cloudflare URL 格式
     url_pattern = r"https://[a-zA-Z0-9-]+\.trycloudflare\.com"
     
-    print("⏳ Waiting for public URL...")
+    print("⏳ 正在等待分配公网地址 (请稍候)...", flush=True)
     
-    # Cloudflared outputs to stderr usually
     while not stop_event.is_set():
         line = process.stderr.readline()
         if not line and process.poll() is not None:
             break
             
         if line:
-            # print(f"DEBUG: {line.strip()}") # Uncomment for debugging
-            match = re.search(url_pattern, line)
+            # [新增] 打印原始日志以便排查，但过滤掉无用信息
+            line_str = line.strip()
+            # 只要包含关键信息就打印，方便用户观察进度
+            if any(x in line_str for x in ["trycloudflare.com", "connected", "location"]):
+                print(f"[Cloudflare] {line_str}", flush=True)
+                
+            match = re.search(url_pattern, line_str)
             if match:
                 public_url = match.group(0)
-                print(f"\n✅ Public URL generated: {public_url}")
-                print(f"📋 Share this URL with your team to access the app.")
+                print("\n" + "="*50, flush=True)
+                print(f"✅ 公网访问地址已生成!", flush=True)
+                print(f"🔗 链接: {public_url}", flush=True)
+                print("="*50 + "\n", flush=True)
                 
-                # Save to file
+                # Save and Open
                 try:
                     with open(URL_FILE_PATH, "w") as f:
                         f.write(public_url)
-                    print(f"💾 URL saved to {URL_FILE_PATH}")
                     
-                    # Auto-open in browser if requested
                     import webbrowser
-                    print(f"🌍 Opening {public_url} in your browser...")
+                    print(f"🌍 正在尝试自动打开浏览器...", flush=True)
                     webbrowser.open(public_url)
-                    
                 except Exception as e:
-                    print(f"⚠️ Failed to save URL to file: {e}")
+                    print(f"⚠️ 自动打开失败，请手动复制上面的链接", flush=True)
                 
                 # Keep monitoring for stability, but we found the URL
                 # return public_url 

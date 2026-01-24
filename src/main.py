@@ -102,7 +102,6 @@ def render_login_page(auth_service):
                     # 转换为字典以兼容现有逻辑
                     st.session_state['user'] = user_resp.model_dump()
                     st.success(f"欢迎，{user_resp.username}")
-                    time.sleep(0.3)
                     st.rerun()
                 else:
                     st.error("用户名或密码错误")
@@ -123,26 +122,35 @@ def render_login_page(auth_service):
                     else:
                         st.error(msg)
 
+@st.cache_resource
+def get_service_container():
+    """获取并缓存服务容器"""
+    container = ServiceContainer()
+    # 确保默认管理员存在
+    container.auth_service.ensure_default_admin()
+    return container
+
 def main():
     """主函数"""
-    # 初始化服务容器
-    if 'container' not in st.session_state:
-        st.session_state.container = ServiceContainer()
-        # 确保默认管理员存在
-        st.session_state.container.auth_service.ensure_default_admin()
-        
-    container = st.session_state.container
+    # 1. 初始化并获取缓存的服务容器
+    container = get_service_container()
 
-    # 初始化服务到 session_state (为了兼容旧代码直接从 session_state 获取)
+    # 2. 登录状态检查 (最高优先级，如果不满足则渲染登录页并终止)
+    if "user" not in st.session_state:
+        st.session_state['user'] = None
+
+    if not st.session_state.get('user'):
+        render_login_page(container.auth_service)
+        return
+
+    # 3. 初始化服务到 session_state (为了兼容旧代码)
     if 'services' not in st.session_state:
         st.session_state.services = {}
     st.session_state.services['bom_service'] = container.bom_service
-    # 也可以放入其他 service
     st.session_state.services['inventory_service'] = container.inventory_service
     st.session_state.services['auth_service'] = container.auth_service
 
-    # 路由配置 - 注入特定服务
-    # 注意：这里的键名必须与 src/components/sidebar.py 中的 menu_structure 完全一致
+    # 4. 路由配置
     PAGE_ROUTES = {
         "📊 项目概览": lambda: render_dashboard(container.data_service),
         "🧪 实验管理": lambda: render_experiment_management(container.data_service),
@@ -155,27 +163,19 @@ def main():
         "📄 报告生成": lambda: render_report_page()
     }
 
-    if "user" not in st.session_state:
-        st.session_state['user'] = None
-
+    # 5. 侧边栏渲染 (包含用户信息和菜单)
     with st.sidebar:
-        if st.session_state.get('user'):
-            st.markdown(f"当前用户：**{st.session_state['user']['username']}** ({st.session_state['user'].get('role', 'user')})")
-            if st.button("退出登录", use_container_width=True):
-                st.session_state['user'] = None
-                st.rerun()
-
-    if not st.session_state.get('user'):
-        render_login_page(container.auth_service)
-        return
+        st.markdown(f"当前用户：**{st.session_state['user']['username']}** ({st.session_state['user'].get('role', 'user')})")
+        if st.button("退出登录", use_container_width=True):
+            st.session_state['user'] = None
+            st.rerun()
 
     # DataService 已经实现了所需接口，直接传递
     selected_page_name = render_sidebar(container.data_service, PAGE_ROUTES)
     
-    # 获取对应页面的渲染函数
+    # 6. 获取对应页面的渲染函数并执行
     selected_page_func = PAGE_ROUTES.get(selected_page_name)
     
-    # 渲染选中的页面
     if selected_page_func:
         with st.container():
             selected_page_func()

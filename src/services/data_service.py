@@ -42,6 +42,8 @@ class DataService:
     def __init__(self):
         self.data_file = DATA_FILE
         self.backup_dir = BACKUP_DIR
+        self._data_cache = None  # 运行时缓存
+        self._last_load_time = 0
         
         self._ensure_valid_data_file()
         
@@ -103,40 +105,47 @@ class DataService:
         return data
 
     def load_data(self) -> Dict[str, Any]:
-        """Load data from JSON file."""
+        """Load data from JSON file with caching."""
+        import time
+        current_time = time.time()
+        
+        # 1. 如果缓存有效（5秒内），直接返回
+        if self._data_cache is not None and (current_time - self._last_load_time) < 5:
+            return self._data_cache
+
         try:
             if self.data_file.exists():
                 with open(self.data_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 data = self._ensure_data_structure(data)
                 
-                # 数据迁移：标准化 usage_category 字段
-                if DataCategory.RAW_MATERIALS.value in data:
-                    materials = data[DataCategory.RAW_MATERIALS.value]
-                    migrated = False
-                    for m in materials:
-                        # 如果已有 usage_category，保留原值
-                        if "usage_category" in m and m["usage_category"]:
-                            # 如果之前有遗留的 usage 字段，清理掉
-                            if "usage" in m:
-                                del m["usage"]
-                                migrated = True
-                            continue
-                        
-                        # 尝试从旧的 usage 字段迁移
-                        old_usage = m.get("usage", "")
-                        if old_usage:
-                            m["usage_category"] = old_usage
-                            del m["usage"]
-                        else:
-                            m["usage_category"] = "其他"
-                        
+        # 2. 数据迁移逻辑：使用版本标记，避免重复全量扫描
+        migrations = data.get("_migrations", {})
+        if not migrations.get("raw_material_usage_v1", False):
+            if DataCategory.RAW_MATERIALS.value in data:
+                materials = data[DataCategory.RAW_MATERIALS.value]
+                migrated = False
+                for m in materials:
+                    if "usage_category" not in m or ("usage" in m):
+                        old_usage = m.pop("usage", "")
+                        if "usage_category" not in m:
+                            m["usage_category"] = old_usage or "其他"
                         migrated = True
-                    
-                    if migrated:
-                        logger.info("Migrated raw material data to use 'usage_category' field.")
-                        self.save_data(data)
                 
+                # 标记迁移已完成
+                if "_migrations" not in data:
+                    data["_migrations"] = {}
+                data["_migrations"]["raw_material_usage_v1"] = True
+                
+                if migrated:
+                    logger.info("Migrated raw material data to use 'usage_category' field.")
+                    self.save_data(data)
+                else:
+                    # 即使没有实际条目被修改，也标记已检查过，避免下次加载再扫描
+                    self.save_data(data)
+                
+                self._data_cache = data
+                self._last_load_time = current_time
                 return data
             else:
                 return self.get_initial_data()
@@ -176,6 +185,11 @@ class DataService:
             
             # Update backup timestamp
             st.session_state.last_backup_time = datetime.now()
+            
+            # 3. 更新缓存
+            self._data_cache = data
+            import time
+            self._last_load_time = time.time()
             
             return True
         except Exception as e:

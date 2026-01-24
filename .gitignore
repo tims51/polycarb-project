@@ -15,6 +15,13 @@ env/
 # Project specific
 .trae/
 .public_url
+public_url.txt
+.env_installed
 *.log
 backups/
 temp/
+
+# Data and Secret
+data/*.json
+data/backups/
+!data/.gitkeep
